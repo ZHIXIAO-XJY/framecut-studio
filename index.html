@@ -4161,9 +4161,173 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
 > 说明：AI 辅助内容与自动质检结果仅供创作参考；台词、说话人归属与角色身份仍需人工复核。`;
   }
 
+  function buildPrecisionMarkdown(options = {}) {
+    const p = state.project;
+    const meta = exportMeta();
+    const counts = shotCounts();
+    const imageMode = options.imageMode || 'inline';
+    const profiles = characterProfiles(p.shots);
+    const dialogueRows = dialogueTimeline(p.shots);
+    const out = [];
+    const push = (...xs) => out.push(...xs);
+
+    const firstSentence = (text) => {
+      const s = String(text || '').replace(/\s+/g, ' ').trim();
+      if (!s) return '未命名分镜';
+      return s.split(/[。；！？]/)[0].slice(0, 26);
+    };
+    const uniqJoin = (arr, sep = '；') => [...new Set((arr || []).filter(Boolean))].join(sep);
+
+    push(`# 《${meta.title}》高精度脚本还原`);
+    push('');
+    push(`> **片长**：[${meta.duration}]｜**画幅**：${meta.resolution}｜**帧率**：${projectMode().fps}fps｜**类型**：${meta.style}`);
+    push(`> **画面常驻元素**：FrameCut 本地抽帧；${p.shots.length} 个采样分镜`);
+    push(`> **核心内容**：${meta.theme}`);
+    push(`> **交付结构**：角色档案 → 造型变更 → 语气神态总表 → 逐分镜详细脚本 → 表演提示 → 数据校验`);
+    push(`> **本版信息层级**：逐条含 🎙️声音质感 / 😐表情变化轨迹 / 👀眼神交互 / 🙌动作细节 / 🫧神态气场`);
+    push('');
+    push('---');
+    push('');
+
+    push('## 📋 角色档案');
+    push('');
+    if (!profiles.length) {
+      push('> 暂无人物数据。先运行「AI 补全」，或在分镜编辑里填写人物特征。');
+    } else {
+      for (const c of profiles) {
+        push(`- **【${c.name}】**：${uniqJoin([...c.appearance], '；') || '外貌待补'}。**造型**：${uniqJoin([...c.wardrobe], '；') || '造型待补'}。**出现**：${fmtTime(c.first)}–${fmtTime(c.last)}，共 ${c.count} 个采样分镜。**神态关键词**：${uniqJoin([...c.expressions], '；') || '待补'}。`);
+      }
+    }
+    push('');
+    push('### 🧩 造型变更表');
+    push('');
+    push('| 角色 | 造型 A | 造型 B | 触发场景 |');
+    push('|---|---|---|---|');
+    if (profiles.length) {
+      for (const c of profiles) {
+        const w = [...c.wardrobe];
+        push(`| ${mdCell(c.name)} | ${mdCell(w[0] || '待补')} | ${mdCell(w[1] || '—')} | ${w.length > 1 ? '片中出现换装，需逐段复核' : '全片未换装'} |`);
+      }
+    } else {
+      push('| — | — | — | — |');
+    }
+    push('');
+    push('---');
+    push('');
+
+    push('## 🎭 角色语气·神态总档案（表演基调速查）');
+    push('');
+    push('| 角色 | 音色/音高 | 语速·节奏 | 气息特征 | 招牌微表情 | 情绪外化方式 |');
+    push('|---|---|---|---|---|---|');
+    if (profiles.length) {
+      for (const c of profiles) {
+        const tones = dialogueRows.filter((d) => d.speaker === c.name && d.tone).map((d) => d.tone);
+        const shotsOf = p.shots.filter((s) => (s.characters || []).some((x) => x.name === c.name));
+        const emotions = shotsOf.map((s) => s.emotion).filter(Boolean);
+        push(`| ${mdCell(c.name)} | ${mdCell(uniqJoin(tones, ' / ') || '待补')} | ${mdCell(emotions[0] || '待补')} | ${mdCell(c.expressions.size ? uniqJoin([...c.expressions], ' / ') : '待补')} | ${mdCell(c.expressions.size ? uniqJoin([...c.expressions], ' / ') : '待补')} | ${mdCell(uniqJoin(emotions, ' / ') || '待补')} |`);
+      }
+    } else {
+      push('| — | — | — | — | — | — |');
+    }
+    push('');
+    push('---');
+    push('');
+
+    push('## 🎬 详细脚本分解');
+    push('');
+    if (!p.shots.length) push('（暂无分镜）');
+    for (const shot of p.shots) {
+      const chars = (shot.characters || []).filter((c) => c && c.name);
+      const dLines = (shot.dialogueLines || []).filter((d) => d && d.text);
+      const title = firstSentence(shot.description);
+      push(`### ⏱️ [${fmtTime(shot.start)} - ${fmtTime(shot.end)}] #${String(shot.index).padStart(3, '0')} · ${title}`);
+      push('');
+      push(`> **场景描述**：${shot.description || '待补全。'}`);
+      push(`> **构图**：${shot.shotSize || '景别待补'} / ${shot.angle || '视角待补'} / ${shot.camera || '运镜待补'}。**光线**：${shot.lighting || '待补'}。**环境**：${shot.environment || '待补'}。`);
+      push('');
+      if (shot.thumb && imageMode !== 'none') {
+        const file = `frames/${String(shot.index).padStart(3, '0')}.jpg`;
+        push(imageMode === 'folder' ? `![分镜 ${shot.index}](${file})` : `<img src="${shot.thumb}" width="180" alt="分镜 ${shot.index}">`);
+        push('');
+      }
+      push(`**人物**：${chars.length ? chars.map((c) => `【${c.name}】${c.appearance || ''}${c.wardrobe ? '（' + c.wardrobe + '）' : ''}`).join('；') : '画面无可见人物 / 待补'}`);
+      push('');
+      if (dLines.length) {
+        for (const d of dLines) {
+          push(`**【${d.speaker || '未知'}】**（语气：${d.tone || shot.emotion || '待补'}）`);
+          push(`"${d.text}"`);
+          push('');
+        }
+      } else if (shot.dialogue) {
+        push(`**【未知】**（语气：${shot.emotion || '待补'}）`);
+        push(`"${shot.dialogue}"`);
+        push('');
+      } else {
+        push('**台词**：无台词 / 字幕。');
+        push('');
+      }
+
+      const actions = chars.map((c) => c.action).filter(Boolean);
+      const looks = actions.filter((a) => /看|视|盯|望|目光|眼/.test(a));
+      const tones = dLines.map((d) => d.tone).filter(Boolean);
+      const expressions = chars.map((c) => c.expression).filter(Boolean);
+      const arcs = (shot.expressionArc || []).filter((e) => e.expression);
+      push(`- **🎙️ 声音质感**：${mdCell(uniqJoin([...tones, shot.emotion], '；') || '待补（无台词时记录环境声/气息）')}`);
+      push('- **😐 表情变化轨迹**：');
+      if (arcs.length) {
+        for (const e of arcs) push(`    * \`[${e.time || '—'}]\` ${e.expression}`);
+      } else if (expressions.length) {
+        for (const e of expressions.slice(0, 4)) push(`    * ${e}`);
+      } else {
+        push('    * 待补');
+      }
+      push(`- **👀 眼神交互**：${mdCell(uniqJoin(looks, '；') || '待补（记录看谁/何时移开）')}`);
+      push(`- **🙌 动作细节**：${mdCell(uniqJoin(actions, '；') || shot.description || '待补')}`);
+      push(`- **🫧 神态气场**：${mdCell(uniqJoin([...expressions, shot.emotion], '；') || '待补')}`);
+      push('');
+      push(`> **画面**：${shot.thumb ? (imageMode === 'none' ? '帧图未导出（纯文字版）' : '见上方帧图') : '无帧'}；分镜 ${shot.index} / ${p.shots.length}。`);
+      push('');
+      push('---');
+      push('');
+    }
+
+    push('## 🎬 表演提示单（按角色）');
+    push('');
+    if (!profiles.length) {
+      push('（暂无人物质料，先运行 AI 补全。）');
+    } else {
+      for (const c of profiles) {
+        const shotsOf = p.shots.filter((s) => (s.characters || []).some((x) => x.name === c.name));
+        const arcs = shotsOf.flatMap((s) => (s.expressionArc || []).map((e) => `${fmtTime(s.start)} ${e.expression}`)).slice(0, 8);
+        push(`- **【${c.name}】**：${uniqJoin(arcs, '；') || uniqJoin([...c.expressions], '；') || '情绪曲线待补'}`);
+      }
+    }
+    push('');
+    push('---');
+    push('');
+
+    push('## 🧩 交付说明');
+    push('');
+    push(`- 本文件由 FrameCut 拆镜台根据 **${p.shots.length} 个采样分镜**生成。`);
+    push(`- 抽帧模式：${meta.mode}；原始文件：${meta.fileName}；分辨率：${meta.resolution}；时长：${meta.duration}。`);
+    push('- AI 辅助内容、人物称谓、说话人归属、品牌与价格仍需人工复核。');
+    push('- 「待补」不等于无内容；空镜、无台词镜头可保留为空。');
+    push('');
+    push('## 🔍 数据校验');
+    push('');
+    push(`- 分镜总数：${p.shots.length}`);
+    push(`- 画面通过：${counts.pass}；待确认：${counts.warn}；异常：${counts.fail}`);
+    push(`- 人物档案：${profiles.length} 人`);
+    push(`- 台词条目：${dialogueRows.length}`);
+    push(`- 导出时间：${new Date().toLocaleString('zh-CN')}`);
+    push('');
+    push('> 参考交付格式：高精度脚本还原（角色档案 → 造型变更 → 语气神态总表 → 逐段五维脚本 → 校验记录）。');
+    return out.join('\n');
+  }
+
   function safeFileName(name, ext) {
     const base = String(name || '分镜脚本').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').slice(0, 60);
-    return `${base}_人物台词分镜拆解_${new Date().toISOString().slice(0, 10)}.${ext}`;
+    return `${base}_高精度脚本还原_${new Date().toISOString().slice(0, 10)}.${ext}`;
   }
 
   function downloadBlob(filename, blob) {
@@ -4278,7 +4442,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
   }
 
   function buildProjectZip(markdown) {
-    const files = [{ name: '分镜脚本.md', bytes: textBytes(markdown) }];
+    const files = [{ name: '高精度脚本还原.md', bytes: textBytes(markdown) }];
     for (const shot of state.project.shots) {
       if (!shot.thumb) continue;
       files.push({ name: `frames/${String(shot.index).padStart(3, '0')}.jpg`, bytes: dataURLToBytes(shot.thumb) });
@@ -4315,7 +4479,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
   function exportMarkdown(mode) {
     if (!state.project?.shots.length) { toast('还没有分镜可导出。', 'warn'); return; }
     const imageMode = mode === 'zip' ? 'folder' : mode === 'none' ? 'none' : 'inline';
-    const md = buildMarkdown({ imageMode });
+    const md = buildPrecisionMarkdown({ imageMode });
     if (mode === 'zip') {
       toast('正在打包帧图 ZIP…', 'info', 3000);
       const blob = buildProjectZip(md);
