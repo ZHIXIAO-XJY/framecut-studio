@@ -732,6 +732,9 @@ h1.project-title button:hover{background:var(--panel-3)}
         </button>
         <span class="side-meta" id="storage-note">全程本地 · 不传云端</span>
       </div>
+      <button class="link-btn" id="btn-regroup" type="button" style="margin-top:6px">
+        <svg class="icon" style="width:11px;height:11px"><use href="#i-layers"/></svg>把当前采样帧按场景重新分镜
+      </button>
       <p class="help" id="extract-help">抽帧使用浏览器原生解码 + Canvas，不需要服务器；大文件的速度取决于设备性能。</p>
     </section>
 
@@ -1054,8 +1057,8 @@ h1.project-title button:hover{background:var(--panel-3)}
     </div>
     <div class="modal-body">
       <div class="settings-block">
-        <div class="qc-row"><span>待补全镜头</span><b id="batch-candidates">0</b></div>
-        <div class="qc-row"><span>项目总镜头</span><b id="batch-total">0</b></div>
+        <div class="qc-row"><span>待补全分镜</span><b id="batch-candidates">0</b></div>
+        <div class="qc-row"><span>项目总分镜</span><b id="batch-total">0</b></div>
         <div class="qc-row"><span>视觉模型</span><b id="batch-vision-model">deepseek-flash</b></div>
         <div class="qc-row"><span>质检策略</span><b>补全后自动质检</b></div>
         <div class="inline-row" style="margin-top:5px"><button class="link-btn" id="btn-batch-api" type="button">修改视觉 / 文本模型与 Key</button></div>
@@ -1074,7 +1077,7 @@ h1.project-title button:hover{background:var(--panel-3)}
         </label>
         <label style="display:flex;align-items:flex-start;gap:7px;margin-top:8px;font-size:10px;color:var(--muted);cursor:pointer">
           <input type="checkbox" id="batch-group" checked style="margin-top:2px;accent-color:var(--accent)" />
-          <span>相似帧合并：连续相似画面只请求一次，再回填组内各帧（省请求）</span>
+          <span>相似镜头合并（谨慎）：连续相似分镜只请求一次，再回填组内各分镜；默认关闭，按分镜头逐个补更准</span>
         </label>
         <label style="display:flex;align-items:flex-start;gap:7px;margin-top:8px;font-size:10px;color:var(--muted);cursor:pointer">
           <input type="checkbox" id="batch-auto-qc" checked style="margin-top:2px;accent-color:var(--accent)" />
@@ -1468,6 +1471,8 @@ h1.project-title button:hover{background:var(--panel-3)}
   };
   const SETTINGS_KEY = 'framecut.settings.v1';
   const MAX_FRAMES = 3200;
+  const SCENE_CUT_DISTANCE = 18;
+  const SCENE_MAX_SECONDS = 10;
   const PAGE_SIZE = 120;
   const DB_NAME = 'framecut.local.v1';
   const DB_STORE = 'project';
@@ -1703,12 +1708,14 @@ h1.project-title button:hover{background:var(--panel-3)}
 
     const lum = new Float32Array(sw * sh);
     let sum = 0, dark = 0, colorSum = 0;
+    let rSum = 0, gSum = 0, bSum = 0;
     for (let i = 0, p = 0; i < data.length; i += 4, p++) {
       const r = data[i], g = data[i + 1], b = data[i + 2];
       const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
       lum[p] = y; sum += y;
       if (y < 22) dark++;
       colorSum += Math.max(r, g, b) - Math.min(r, g, b);
+      rSum += r; gSum += g; bSum += b;
     }
     const n = sw * sh;
     const mean = sum / n;
@@ -1747,8 +1754,14 @@ h1.project-title button:hover{background:var(--panel-3)}
       sharpness: Math.round(sharpness * 10) / 10,
       colorfulness: Math.round((colorSum / n) * 10) / 10,
       darkRatio: Math.round((dark / n) * 1000) / 1000,
+      color: [Math.round(rSum / n), Math.round(gSum / n), Math.round(bSum / n)],
       hash
     };
+  }
+
+  function colorDistance(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return 0;
+    return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
   }
 
   function hashDistance(a, b) {
@@ -2352,8 +2365,8 @@ h1.project-title button:hover{background:var(--panel-3)}
 
     setText('#stat-shots', total);
     const shotsEl = $('#stat-shots');
-    if (shotsEl) shotsEl.innerHTML = `${total} <small>帧</small>`;
-    setText('#stat-shots-sub', p?.demo ? '示例精选' : (p ? '按时间轴' : '等待载入'));
+    if (shotsEl) shotsEl.innerHTML = `${total} <small>个</small>`;
+    setText('#stat-shots-sub', p?.demo ? '示例分镜' : (p ? `${p.capturedFrames || total} 采样帧合并` : '等待载入'));
     setText('#stat-duration', fmtTime(p?.duration || 0, true));
     setText('#stat-duration-sub', p?.width ? `${p.width} × ${p.height}` : '分辨率未知');
     setText('#stat-mode', `${projectMode().fps} fps`);
@@ -2361,14 +2374,14 @@ h1.project-title button:hover{background:var(--panel-3)}
     setText('#stat-qc', `${c.pass}`);
     const qcEl = $('#stat-qc');
     if (qcEl) qcEl.innerHTML = `${c.pass}<small> / ${total}</small>`;
-    setText('#stat-qc-sub', total ? (need ? `${need} 项画面问题 · ${fieldMissing} 帧字段待补` : fieldMissing ? `${fieldMissing} 帧字段待补` : '全部通过') : '尚未质检');
+    setText('#stat-qc-sub', total ? (need ? `${need} 项画面问题 · ${fieldMissing} 个分镜字段待补` : fieldMissing ? `${fieldMissing} 个分镜字段待补` : '全部通过') : '尚未质检');
     const ring = $('#qc-ring');
     if (ring) ring.style.setProperty('--p', passRate);
     setText('#qc-ring-text', passRate);
     setText('#side-qc-text', total ? (need ? `${need} 项画面问题` : '全部通过') : '自动 · 已启用');
     setText('#side-field-text', `${fieldDone} / ${total}`);
     const pendingAI = total ? batchCandidates(false).length : 0;
-    setText('#side-ai-candidates', total ? `${pendingAI} 帧` : '0');
+    setText('#side-ai-candidates', total ? `${pendingAI} 个分镜` : '0');
     setText('#side-ai-model', state.settings.visionModel || '未配置');
     setText('#side-ai-state', !total ? '未开始' : pendingAI ? '待补全' : '已完成');
     setText('#side-ai-note', pendingAI ? '先质检，再补全' : '字段已补全');
@@ -2846,6 +2859,68 @@ h1.project-title button:hover{background:var(--panel-3)}
     return times;
   }
 
+  // 把采样帧按硬切/时长合并成“分镜头”。之后 AI、质检、复核、导出都以分镜为单位。
+  function groupFramesToShots(frames) {
+    if (!frames.length) return [];
+    if (frames[0].frameCount) return frames; // 已经是分镜
+    const groups = [];
+    let current = [frames[0]];
+    for (let i = 1; i < frames.length; i++) {
+      const prev = frames[i - 1];
+      const cur = frames[i];
+      const dist = prev?.metrics?.hash != null && cur?.metrics?.hash != null
+        ? hashDistance(prev.metrics.hash, cur.metrics.hash) : null;
+      const colorDist = colorDistance(prev?.metrics?.color, cur?.metrics?.color);
+      const cut = (dist != null && dist >= SCENE_CUT_DISTANCE) || colorDist >= 90;
+      const tooLong = cur.end - current[0].start >= SCENE_MAX_SECONDS;
+      if (cut || tooLong) {
+        groups.push(current);
+        current = [cur];
+      } else {
+        current.push(cur);
+      }
+    }
+    if (current.length) groups.push(current);
+    return groups.map((group, i) => makeShotFromFrames(group, i + 1));
+  }
+
+  function makeShotFromFrames(group, index) {
+    const first = group[0];
+    const last = group[group.length - 1];
+    const rep = group[Math.floor(group.length / 2)] || first;
+    const dialogues = [...new Set(group.map((f) => f.dialogue).filter(Boolean))];
+    const keyIndexes = [...new Set([0, Math.floor((group.length - 1) / 2), group.length - 1])];
+    const keyframes = keyIndexes.map((i) => ({ t: group[i].start, thumb: group[i].thumb })).filter((k) => k.thumb);
+    return {
+      id: uid(),
+      index,
+      start: first.start,
+      end: last.end,
+      frameCount: group.length,
+      keyframes,
+      thumb: rep.thumb || first.thumb || '',
+      width: rep.width || first.width || 0,
+      height: rep.height || first.height || 0,
+      description: '',
+      dialogue: dialogues.join(' / '),
+      dialogueSource: dialogues.length ? 'subtitle' : '',
+      dialogueLines: [],
+      characters: [],
+      camera: '',
+      shotSize: '',
+      angle: '',
+      environment: '',
+      lighting: '',
+      emotion: '',
+      expressionArc: [],
+      notes: '',
+      metrics: rep.metrics || first.metrics || null,
+      qc: { status: 'pending', score: null, issues: [], checkedAt: null, method: 'auto' },
+      manualPass: false,
+      aiAnalyzed: false
+    };
+  }
+
   function findSubtitle(start, end) {
     if (!state.pendingSubs.length) return '';
     // 每条字幕只挂到「起始时间落入」的那个采样帧，避免同一句在整段镜头里重复。
@@ -3066,28 +3141,30 @@ h1.project-title button:hover{background:var(--panel-3)}
       );
       shots = result.shots;
       failed = result.failed;
-      state.project.shots = shots;
+      setProgress(92, '正在分镜', `把 ${shots.length} 个采样帧按场景合并…`, '—', 'qc');
+      const grouped = groupFramesToShots(shots);
+      state.project.capturedFrames = shots.length;
+      state.project.shots = grouped;
 
       if (state.ui.cancelRequested) {
-        toast(`已停止，保留已抽取的 ${shots.length} 帧。`, 'warn');
-      } else if (state.project.shots.length) {
-        setProgress(95, '自动质检', '检查黑屏、模糊、字段完整性…', '—', 'qc');
-        renderBoard();
-        await sleep(180);
-        applyAutoQC(state.project.shots);
-        state.project.poster = state.project.shots[0]?.thumb || state.project.poster;
+        toast(`已停止，保留已抽取的 ${shots.length} 个采样帧，合并为 ${grouped.length} 个分镜。`, 'warn');
+      } else if (grouped.length) {
+        setProgress(96, '自动质检', `${grouped.length} 个分镜 · 检查画面与字段…`, '—', 'qc');
+        await sleep(160);
+        applyAutoQC(grouped);
+        state.project.poster = grouped[0]?.thumb || state.project.poster;
       }
-      if (state.project.shots.length) {
+      if (grouped.length) {
         state.project.duration = duration;
         state.project.width = state.video.width || state.project.width;
         state.project.height = state.video.height || state.project.height;
       }
-      setProgress(100, '拆解完成', `${state.project.shots.length} 帧 · ${failed} 帧失败`, 'DONE', 'qc');
+      setProgress(100, '拆解完成', `${shots.length} 采样帧 → ${grouped.length} 个分镜 · ${failed} 帧失败`, 'DONE', 'qc');
       setTimeout(() => showProgress(false), 650);
       renderAll();
-      if (state.project.shots.length) scheduleAutosave();
+      if (grouped.length) scheduleAutosave();
       if (!state.ui.cancelRequested) {
-        toast(`拆解完成：${state.project.shots.length} 个分镜已自动质检。`, 'success');
+        toast(`拆解完成：${shots.length} 个采样帧合并为 ${grouped.length} 个分镜，已自动质检。`, 'success', 5000);
         $('#board-scroll').scrollTo({ top: 0, behavior: 'smooth' });
       }
     } catch (err) {
@@ -3103,6 +3180,22 @@ h1.project-title button:hover{background:var(--panel-3)}
       renderAll();
       setTimeout(() => showProgress(false), 300);
     }
+  }
+
+  async function regroupProject() {
+    const p = state.project;
+    if (!p?.shots?.length) { toast('还没有采样帧可分镜。', 'warn'); return; }
+    if (p.shots[0]?.frameCount) { toast('当前项目已经是按分镜头组织，不需要再合并。', 'info'); return; }
+    const ok = await askConfirm('按场景重新分镜', `将把当前 ${p.shots.length} 个采样帧按画面硬切合并为分镜头，并清空帧级的 AI 字段与质检结果。继续吗？`, '重新分镜');
+    if (!ok) return;
+    const rawCount = p.shots.length;
+    const grouped = groupFramesToShots(p.shots);
+    p.capturedFrames = rawCount;
+    p.shots = grouped;
+    applyAutoQC(grouped);
+    renderAll();
+    scheduleAutosave();
+    toast(`已把 ${rawCount} 个采样帧合并为 ${grouped.length} 个分镜头。`, 'success', 5000);
   }
 
   // ── 单镜 / 全局质检 ───────────────────────────────────────
@@ -3551,9 +3644,9 @@ h1.project-title button:hover{background:var(--panel-3)}
     const groups = batchGroups(overwrite, merge);
     const size = Math.min(Number($('#batch-size')?.value || 24), groups.length);
     const covered = groups.slice(0, size).reduce((n, g) => n + g.length, 0);
-    setText('#batch-candidates', `${candidates.length} 帧 · ${groups.length} 组`);
+    setText('#batch-candidates', `${candidates.length} 个分镜 · ${groups.length} 组`);
     setText('#batch-total', state.project.shots.length);
-    setText('#batch-estimate', groups.length ? `预计 ${size} 次请求，覆盖 ${covered} 帧` : '没有待补全镜头');
+    setText('#batch-estimate', groups.length ? `预计 ${size} 次请求，覆盖 ${covered} 个分镜` : '没有待补全的分镜');
     setText('#batch-progress-label', '准备补全');
     setText('#batch-progress-pct', '0%');
     setText('#batch-progress-detail', `0 / ${size} 组`);
@@ -3568,7 +3661,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     if (!state.settings.proxyMode && !state.settings.apiKey) { openSettings(); toast('请先填写 API Key，或开启代理模式。', 'warn'); return; }
     if (state.batchAI.running) return;
     $('#batch-overwrite').checked = false;
-    $('#batch-group').checked = true;
+    $('#batch-group').checked = false;
     $('#batch-auto-qc').checked = true;
     $('#batch-progress').hidden = true;
     $('#batch-log').hidden = true;
@@ -3592,11 +3685,11 @@ h1.project-title button:hover{background:var(--panel-3)}
     const groups = state.project ? batchGroups(false, merge) : [];
     const remaining = groups.length;
     btn.hidden = remaining === 0;
-    btn.textContent = `继续下一批（剩余 ${remaining} 组 / ${frames} 帧）`;
-    setText('#batch-candidates', `${frames} 帧 · ${remaining} 组`);
+    btn.textContent = `继续下一批（剩余 ${remaining} 组 / ${frames} 个分镜）`;
+    setText('#batch-candidates', `${frames} 个分镜 · ${remaining} 组`);
     const size = Math.min(Number($('#batch-size').value || 24), remaining);
     const covered = groups.slice(0, size).reduce((n, g) => n + g.length, 0);
-    setText('#batch-estimate', remaining ? `预计 ${size} 次请求，覆盖 ${covered} 帧` : '没有待补全镜头');
+    setText('#batch-estimate', remaining ? `预计 ${size} 次请求，覆盖 ${covered} 个分镜` : '没有待补全的分镜');
     if (!state.batchAI.running) $('#btn-batch-start').disabled = remaining === 0;
   }
 
@@ -3655,8 +3748,8 @@ h1.project-title button:hover{background:var(--panel-3)}
       const done = completedGroups + failedGroups;
       const pct = queue.length ? Math.round((done / queue.length) * 100) : 0;
       setText('#batch-progress-pct', pct + '%');
-      setText('#batch-progress-detail', `${done} / ${queue.length} 组 · ${framesDone} 帧`);
-      setText('#batch-progress-failed', `失败 ${failedGroups} 组 / ${framesFailed} 帧`);
+      setText('#batch-progress-detail', `${done} / ${queue.length} 组 · ${framesDone} 个分镜`);
+      setText('#batch-progress-failed', `失败 ${failedGroups} 组 / ${framesFailed} 个分镜`);
       $('#batch-progress-fill').style.width = pct + '%';
       state.batchAI.done = completedGroups;
       state.batchAI.failed = failedGroups;
@@ -3678,13 +3771,13 @@ h1.project-title button:hover{background:var(--panel-3)}
           }
           completedGroups++;
           framesDone += group.length;
-          logBatch(`✓ 组 #${String(rep.index).padStart(3, '0')} +${group.length} 帧 ${rep.description.slice(0, 24)}`);
+          logBatch(`✓ 组 #${String(rep.index).padStart(3, '0')} +${group.length} 个分镜 ${rep.description.slice(0, 24)}`);
         } catch (e) {
           if (e?.name === 'AbortError') break;
           failedGroups++;
           framesFailed += group.length;
           if (!firstError) firstError = e;
-          logBatch(`✕ 组 #${String(rep.index).padStart(3, '0')} +${group.length} 帧 ${explainFetchError(e).slice(0, 52)}`);
+          logBatch(`✕ 组 #${String(rep.index).padStart(3, '0')} +${group.length} 个分镜 ${explainFetchError(e).slice(0, 52)}`);
         } finally {
           group.forEach((shot) => {
             state.ui.aiBusy.delete(shot.id);
@@ -3721,7 +3814,7 @@ h1.project-title button:hover{background:var(--panel-3)}
       }
       if (cancelled) toast(`已停止批量补全：完成 ${completedGroups} 组 / ${framesDone} 帧，失败 ${failedGroups} 组 / ${framesFailed} 帧。`, 'warn', 5500);
       else if (!completedGroups && failedGroups) toast(`批量全部失败：${explainFetchError(firstError).slice(0, 90)}`, 'error', 7000);
-      else toast(`批量补全完成：成功 ${completedGroups} 组 / ${framesDone} 帧，失败 ${failedGroups} 组 / ${framesFailed} 帧。`, failedGroups ? 'warn' : 'success', 6000);
+      else toast(`批量补全完成：成功 ${completedGroups} 组 / ${framesDone} 个分镜，失败 ${failedGroups} 组 / ${framesFailed} 个分镜。`, failedGroups ? 'warn' : 'success', 6000);
     }
   }
 
@@ -5637,6 +5730,7 @@ ${shots}`;
     $('#btn-batch-ai').addEventListener('click', openBatchAI);
     $('#btn-side-batch').addEventListener('click', openBatchAI);
     $('#btn-side-ai-settings').addEventListener('click', openSettings);
+    $('#btn-regroup').addEventListener('click', regroupProject);
     $('#btn-batch-api').addEventListener('click', openSettings);
     $('#btn-batch-start').addEventListener('click', runBatchAI);
     $('#btn-batch-stop').addEventListener('click', stopBatchAI);
