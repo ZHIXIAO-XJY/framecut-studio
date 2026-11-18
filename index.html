@@ -281,6 +281,7 @@ h1.project-title button:hover{background:var(--panel-3)}
 .dialogue{display:flex;gap:6px;margin-top:8px;padding:7px 8px;border-radius:7px;background:var(--panel-2);border-left:2px solid var(--line-strong);font-size:10.5px;line-height:1.55;color:var(--muted);min-height:31px}
 .dialogue .mark{color:var(--accent);font:600 10px/1.5 var(--font-mono);flex:none}
 .dialogue.empty{color:var(--faint);font-style:italic}
+.shot-context{margin-top:7px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);color:var(--muted);font-size:9.5px;line-height:1.6;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .shot-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
 .chip{display:inline-flex;align-items:center;gap:4px;padding:3px 6px;border-radius:4px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);font:400 9px/1.4 var(--font-mono);white-space:nowrap}
 .chip.accent{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 18%,transparent);background:var(--accent-soft)}
@@ -374,6 +375,13 @@ h1.project-title button:hover{background:var(--panel-3)}
 .modal-layer.open{opacity:1;pointer-events:auto}
 .modal{width:min(680px,100%);max-height:calc(100dvh - 44px);overflow:auto;background:var(--panel);border:1px solid var(--line-strong);border-radius:16px;box-shadow:var(--shadow);transform:translateY(10px) scale(.99);transition:.2s var(--ease)}
 .modal-layer.open .modal{transform:none}
+.modal-layer.drawer-right{justify-content:flex-end;align-items:stretch;padding:0}
+.modal-layer.drawer-right .modal{width:min(430px,94vw);max-width:94vw;height:100dvh;max-height:100dvh;border-radius:0;border-left:1px solid var(--line-strong);box-shadow:-24px 0 80px rgba(0,0,0,.45);transform:translateX(24px);display:flex;flex-direction:column}
+.modal-layer.drawer-right.open .modal{transform:none}
+.modal-layer.drawer-right .modal-body{flex:1;overflow:auto}
+.modal-layer.drawer-right .modal-head{flex:none}
+.modal-layer.drawer-right .modal-foot{flex:none}
+@media (max-width:600px){.modal-layer.drawer-right .modal{width:100%;max-width:100%}}
 .modal.narrow{width:min(500px,100%)}.modal.wide{width:min(860px,100%)}
 .modal-head{position:sticky;top:0;z-index:2;display:flex;align-items:flex-start;gap:12px;padding:18px 20px 14px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--panel) 95%,transparent);backdrop-filter:blur(12px)}
 .modal-title{font-family:var(--font-display);font-size:23px;font-weight:500;line-height:1.15;margin:0}
@@ -727,8 +735,27 @@ h1.project-title button:hover{background:var(--panel-3)}
       <p class="help" id="extract-help">抽帧使用浏览器原生解码 + Canvas，不需要服务器；大文件的速度取决于设备性能。</p>
     </section>
 
+    <section class="side-section" id="ai-section">
+      <div class="side-head">
+        <div class="kicker"><b>04</b> AI / 补全</div>
+        <span class="side-meta" id="side-ai-state">待补全</span>
+      </div>
+      <p class="help" style="margin-top:0">拆解完成后，在右侧配置参数，只对缺字段的镜头补人物、对话、视角与环境。补全后自动质检一遍。</p>
+      <div class="qc-panel">
+        <div class="qc-row"><span>视觉模型</span><b id="side-ai-model">deepseek-flash</b></div>
+        <div class="qc-row"><span>待补全</span><b id="side-ai-candidates">0</b></div>
+      </div>
+      <button class="btn primary wide" id="btn-side-batch" type="button" style="margin-top:9px">
+        <svg class="icon"><use href="#i-sparkles"/></svg>AI 补全 / 参数
+      </button>
+      <div class="inline-row" style="margin-top:8px;justify-content:space-between">
+        <button class="link-btn" id="btn-side-ai-settings" type="button">连接设置</button>
+        <span class="side-meta" id="side-ai-note">先质检，再补全</span>
+      </div>
+    </section>
+
     <section class="side-section">
-      <div class="kicker" style="margin-bottom:10px"><b>04</b> QUALITY GATE / 质检</div>
+      <div class="kicker" style="margin-bottom:10px"><b>05</b> QUALITY GATE / 质检</div>
       <div class="qc-panel">
         <div class="qc-row"><span>画面质检</span><b id="side-qc-text">自动 · 已启用</b></div>
         <div class="qc-row"><span>检测项</span><b>黑屏 / 模糊 / 过曝</b></div>
@@ -1016,12 +1043,12 @@ h1.project-title button:hover{background:var(--panel-3)}
 </div>
 
 <!-- ================= AI 批量补全 ================= -->
-<div class="modal-layer" id="modal-batch-ai" role="dialog" aria-modal="true" aria-labelledby="batch-title">
+<div class="modal-layer drawer-right" id="modal-batch-ai" role="dialog" aria-modal="true" aria-labelledby="batch-title">
   <div class="modal narrow">
     <div class="modal-head">
       <div>
-        <h3 class="modal-title" id="batch-title">AI 批量补全</h3>
-        <div class="modal-sub">只对当前批次调用视觉模型，按帧补描述 / 运镜 / 景别 / 情绪</div>
+        <h3 class="modal-title" id="batch-title">AI 补全 · 参数</h3>
+        <div class="modal-sub">只对当前批次调用视觉模型，补人物 / 对话 / 视角 / 环境，完成后自动质检</div>
       </div>
       <button class="modal-close" type="button" data-close="modal-batch-ai" aria-label="关闭"><svg class="icon" style="width:15px;height:15px"><use href="#i-x"/></svg></button>
     </div>
@@ -1029,6 +1056,9 @@ h1.project-title button:hover{background:var(--panel-3)}
       <div class="settings-block">
         <div class="qc-row"><span>待补全镜头</span><b id="batch-candidates">0</b></div>
         <div class="qc-row"><span>项目总镜头</span><b id="batch-total">0</b></div>
+        <div class="qc-row"><span>视觉模型</span><b id="batch-vision-model">deepseek-flash</b></div>
+        <div class="qc-row"><span>质检策略</span><b>补全后自动质检</b></div>
+        <div class="inline-row" style="margin-top:5px"><button class="link-btn" id="btn-batch-api" type="button">修改视觉 / 文本模型与 Key</button></div>
         <div class="field" style="margin-top:10px">
           <label for="batch-size">本批请求数</label>
           <select class="select" id="batch-size">
@@ -1045,6 +1075,10 @@ h1.project-title button:hover{background:var(--panel-3)}
         <label style="display:flex;align-items:flex-start;gap:7px;margin-top:8px;font-size:10px;color:var(--muted);cursor:pointer">
           <input type="checkbox" id="batch-group" checked style="margin-top:2px;accent-color:var(--accent)" />
           <span>相似帧合并：连续相似画面只请求一次，再回填组内各帧（省请求）</span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:7px;margin-top:8px;font-size:10px;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="batch-auto-qc" checked style="margin-top:2px;accent-color:var(--accent)" />
+          <span>补全结束后自动质检一遍；异常/待确认的镜头可在卡片上单独「质检」重跑</span>
         </label>
       </div>
 
@@ -2333,6 +2367,12 @@ h1.project-title button:hover{background:var(--panel-3)}
     setText('#qc-ring-text', passRate);
     setText('#side-qc-text', total ? (need ? `${need} 项画面问题` : '全部通过') : '自动 · 已启用');
     setText('#side-field-text', `${fieldDone} / ${total}`);
+    const pendingAI = total ? batchCandidates(false).length : 0;
+    setText('#side-ai-candidates', total ? `${pendingAI} 帧` : '0');
+    setText('#side-ai-model', state.settings.visionModel || '未配置');
+    setText('#side-ai-state', !total ? '未开始' : pendingAI ? '待补全' : '已完成');
+    setText('#side-ai-note', pendingAI ? '先质检，再补全' : '字段已补全');
+    setText('#batch-vision-model', state.settings.visionModel || '未配置');
     setText('#run-state', state.ui.extracting ? 'RUNNING' : state.ui.qcBusy ? 'CHECKING' : 'READY');
   }
 
@@ -2444,6 +2484,12 @@ h1.project-title button:hover{background:var(--panel-3)}
       : `<span style="opacity:.8">无台词 / 字幕</span>`;
     const aiBusy = state.ui.aiBusy.has(shot.id);
     const fieldPending = (shot.qc?.fieldIssues || []).length > 0;
+    const contextBits = [
+      (shot.characters || []).length ? `人物 ${(shot.characters || []).map((c) => c.name).filter(Boolean).slice(0, 3).join(' / ')}` : '',
+      shot.environment ? `环境 ${shot.environment}` : '',
+      (shot.expressionArc || []).length ? `神态 ${(shot.expressionArc || []).map((e) => `${e.time} ${e.expression}`).join('；')}` : ''
+    ].filter(Boolean);
+    const contextLine = contextBits.length ? `<div class="shot-context">${esc(contextBits.join(' · '))}</div>` : '';
     return `
       <article class="shot-card qc-${statusClass(st)}" data-shot-id="${escapeAttr(shot.id)}">
         <div class="shot-thumb ${shot.height > shot.width ? 'portrait' : ''}" data-action="zoom" data-id="${escapeAttr(shot.id)}" title="查看大图">
@@ -2461,6 +2507,7 @@ h1.project-title button:hover{background:var(--panel-3)}
             <p class="shot-desc ${shot.description ? '' : 'empty'}" title="${escapeAttr(shot.description || '')}">${desc}</p>
           </div>
           <div class="dialogue ${shot.dialogue ? '' : 'empty'}">${dialogue}</div>
+          ${contextLine}
           <div class="shot-chips">
             <span class="chip">${esc(shot.camera || '运镜待补')}</span>
             <span class="chip">${esc(shot.shotSize || '景别待补')}</span>
@@ -3079,6 +3126,46 @@ h1.project-title button:hover{background:var(--panel-3)}
     }
   }
 
+  // 单镜“质检 + 按需优化”：先做画面 QC；只有异常/待确认/字段缺失才单独重跑这一帧。
+  async function reviewShot(id) {
+    const shot = state.project?.shots.find((s) => s.id === id);
+    if (!shot) return;
+    if (state.ui.aiBusy.has(id)) return;
+    await runShotQC(id, true);
+    const fieldMissing = (shot.qc?.fieldIssues || []).length > 0;
+    const needsFix = shot.qc?.status !== 'pass' || fieldMissing || !shot.aiAnalyzed;
+    if (!needsFix) {
+      toast(`#${String(shot.index).padStart(3, '0')} 画面与字段通过，无需 AI 重跑。`, 'success');
+      return;
+    }
+    if (!state.settings.proxyMode && !state.settings.apiKey) {
+      toast(`#${String(shot.index).padStart(3, '0')} 已完成画面质检；未配置 AI，未做内容优化。`, 'warn', 5000);
+      return;
+    }
+    if (!shot.thumb) { toast('该分镜没有画面帧，无法做视觉复检。', 'warn'); return; }
+    state.ui.aiBusy.add(id);
+    replaceShotCard(shot);
+    try {
+      const parsed = await requestShotAnalysis(shot);
+      shot.aiUndo = snapshotAIShot(shot);
+      applyAIFields(shot, parsed, true);
+      const idx = state.project.shots.indexOf(shot);
+      shot.qc = evaluateShot(shot, idx > 0 ? state.project.shots[idx - 1] : null);
+      replaceShotCard(shot);
+      renderStats();
+      renderFilters();
+      scheduleAutosave();
+      if (state.review.open) renderReview();
+      toast(`#${String(shot.index).padStart(3, '0')} 已单独复检并优化。`, 'success', 4200);
+    } catch (e) {
+      console.error(e);
+      toast(`#${String(shot.index).padStart(3, '0')} 复检失败：${explainFetchError(e).slice(0, 110)}`, 'error', 6500);
+    } finally {
+      state.ui.aiBusy.delete(id);
+      replaceShotCard(shot);
+    }
+  }
+
   async function runGlobalQC() {
     if (!state.project?.shots.length || state.ui.qcBusy) return;
     state.ui.qcBusy = true;
@@ -3471,6 +3558,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     setText('#batch-progress-pct', '0%');
     setText('#batch-progress-detail', `0 / ${size} 组`);
     setText('#batch-progress-failed', '失败 0');
+    setText('#batch-vision-model', state.settings.visionModel || '未配置');
     $('#batch-progress-fill').style.width = '0%';
     if (!state.batchAI.running) $('#btn-batch-start').disabled = groups.length === 0;
   }
@@ -3481,6 +3569,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     if (state.batchAI.running) return;
     $('#batch-overwrite').checked = false;
     $('#batch-group').checked = true;
+    $('#batch-auto-qc').checked = true;
     $('#batch-progress').hidden = true;
     $('#batch-log').hidden = true;
     $('#batch-log').textContent = '';
@@ -3556,6 +3645,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     setText('#batch-progress-label', merge ? '正在补全（相似帧合并）' : '正在补全');
     setText('#batch-progress-detail', `0 / ${queue.length} 组`);
     setText('#batch-progress-failed', '失败 0');
+    setText('#batch-vision-model', state.settings.visionModel || '未配置');
     $('#batch-progress-fill').style.width = '0%';
     $('#batch-log').hidden = true;
     $('#batch-error').hidden = true;
@@ -3619,6 +3709,7 @@ h1.project-title button:hover{background:var(--panel-3)}
       $('#btn-batch-stop').hidden = true;
       $('#btn-batch-close').disabled = false;
       setText('#batch-progress-label', cancelled ? '已停止' : '补全完成');
+      if (!cancelled && completedGroups > 0 && $('#batch-auto-qc')?.checked) applyAutoQC(state.project.shots);
       renderAll();
       updateBatchNext();
       scheduleAutosave();
@@ -5374,12 +5465,15 @@ ${shots}`;
       if (action === 'zoom') openLightbox(shot);
       else if (action === 'play') previewShot(id);
       else if (action === 'edit') openShotModal(id);
-      else if (action === 'qc') runShotQC(id);
+      else if (action === 'qc') reviewShot(id);
       else if (action === 'ai') analyzeShotWithAI(id);
     });
 
     // 批量 AI
     $('#btn-batch-ai').addEventListener('click', openBatchAI);
+    $('#btn-side-batch').addEventListener('click', openBatchAI);
+    $('#btn-side-ai-settings').addEventListener('click', openSettings);
+    $('#btn-batch-api').addEventListener('click', openSettings);
     $('#btn-batch-start').addEventListener('click', runBatchAI);
     $('#btn-batch-stop').addEventListener('click', stopBatchAI);
     $('#btn-batch-next').addEventListener('click', runBatchAI);

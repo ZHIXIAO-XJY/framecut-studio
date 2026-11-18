@@ -3,7 +3,7 @@
  * - 导航网络优先，断网回退 index.html
  * - 静态资源缓存优先，后台更新
  */
-const VERSION = 'framecut-v1.1.4';
+const VERSION = 'framecut-v1.1.5';
 const BASE = new URL('./', self.location).href;
 const APP_SHELL = [
   BASE,
