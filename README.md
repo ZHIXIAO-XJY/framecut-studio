@@ -71,6 +71,8 @@ https://example.com/framecut/
 ### 方式 A：直连（个人使用）
 
 - Base URL：`https://api.deepseek.com/v1`
+- 视觉模型：`deepseek-flash`（批量看图）
+- 文本模型：`deepseek-v4-pro`（对话/摘要）
 - 填自己的 API Key
 - Key 只存本机 localStorage
 

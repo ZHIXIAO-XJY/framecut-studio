@@ -930,16 +930,24 @@ h1.project-title button:hover{background:var(--panel-3)}
           <label for="api-base">BASE URL</label>
           <input class="input" id="api-base" type="url" spellcheck="false" placeholder="https://api.deepseek.com/v1" />
         </div>
-        <div class="field">
-          <label for="api-model">MODEL NAME</label>
-          <input class="input" id="api-model" list="model-presets" spellcheck="false" placeholder="deepseek-flash" />
-          <datalist id="model-presets">
-            <option value="deepseek-flash"></option>
-            <option value="deepseek-v4-pro"></option>
-            <option value="deepseek-v4-flash-vision-exp"></option>
-          </datalist>
-          <p class="help">DeepSeek 官方当前支持图片输入的是 <code>deepseek-flash</code>；<code>deepseek-v4-pro</code> 不支持图片。若用第三方代理，填代理实际支持的视觉模型。</p>
+        <div>
+          <div class="field">
+            <label for="api-vision-model">视觉模型（看图 / 批量补全）</label>
+            <input class="input" id="api-vision-model" list="model-presets" spellcheck="false" placeholder="deepseek-flash" />
+            <p class="help">批量补全、单镜重解读走这个模型。DeepSeek 官方用 <code>deepseek-flash</code>（支持图片）。</p>
+          </div>
+          <div class="field">
+            <label for="api-text-model">文本模型（对话 / 摘要 / 文字整理）</label>
+            <input class="input" id="api-text-model" list="model-presets" spellcheck="false" placeholder="deepseek-v4-pro" />
+            <p class="help">AI 对话、文字总结走这个模型。可用 <code>deepseek-v4-pro</code> 或与你代理兼容的文本模型。</p>
+          </div>
         </div>
+        <datalist id="model-presets">
+          <option value="deepseek-flash"></option>
+          <option value="deepseek-v4-pro"></option>
+          <option value="deepseek-v4-flash-vision-exp"></option>
+        </datalist>
+        <p class="help">Base URL 和 Key 共用。若代理只有一个模型，两个都填同一个；否则可“看图用视觉模型、对话用文本模型”。</p>
         <div class="field">
           <label for="api-key">API KEY</label>
           <div class="inline-row">
@@ -1412,7 +1420,8 @@ h1.project-title button:hover{background:var(--panel-3)}
   const DEFAULT_SETTINGS = {
     apiKey: '',
     baseUrl: 'https://api.deepseek.com/v1',
-    model: 'deepseek-flash',
+    visionModel: 'deepseek-flash',
+    textModel: 'deepseek-v4-pro',
     stream: true,
     context: true,
     proxyMode: false,
@@ -1462,10 +1471,20 @@ h1.project-title button:hover{background:var(--panel-3)}
   function loadSettings() {
     let stored = {};
     try { stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {}; } catch (e) { stored = {}; }
-    // 旧版本默认模型名在 DeepSeek 官方端点已不可用；只迁移官方端点，避免破坏第三方代理配置。
-    if (stored.model === 'deepseek-v4.1-flash-high' && /api\.deepseek\.com/i.test(stored.baseUrl || DEFAULT_SETTINGS.baseUrl)) {
-      stored.model = 'deepseek-flash';
+    const legacy = stored.model;
+    const official = /api\.deepseek\.com/i.test(stored.baseUrl || DEFAULT_SETTINGS.baseUrl);
+    // 老版本只有一个 model 字段：迁移成“视觉/文本”两套配置。
+    if (legacy && !stored.visionModel) {
+      stored.visionModel = legacy === 'deepseek-v4.1-flash-high'
+        ? (official ? 'deepseek-flash' : legacy)
+        : legacy;
     }
+    if (legacy && !stored.textModel) {
+      stored.textModel = legacy === 'deepseek-v4.1-flash-high'
+        ? (official ? 'deepseek-v4-pro' : legacy)
+        : legacy;
+    }
+    delete stored.model;
     return { ...DEFAULT_SETTINGS, ...stored };
   }
 
@@ -2345,10 +2364,10 @@ h1.project-title button:hover{background:var(--panel-3)}
 
   function renderApiState() {
     const hasAuth = !!(state.settings.apiKey || state.settings.proxyMode);
-    const ready = !!(hasAuth && state.settings.baseUrl && state.settings.model);
+    const ready = !!(hasAuth && state.settings.baseUrl && state.settings.visionModel && state.settings.textModel);
     $('#api-state').classList.toggle('ready', ready);
     setText('#api-state-text', ready ? (state.settings.proxyMode ? 'AI 代理已配置' : 'AI 已配置') : 'AI 未配置');
-    setText('#assistant-model', state.settings.model || '未设置模型');
+    setText('#assistant-model', ready ? `视觉 ${state.settings.visionModel} · 文本 ${state.settings.textModel}` : '未设置模型');
   }
 
   function getFilteredShots() {
@@ -2357,7 +2376,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     return shots.filter((s) => {
       if (state.ui.filter !== 'all' && (s.qc?.status || 'pending') !== state.ui.filter) return false;
       if (!q) return true;
-      return [s.description, s.dialogue, s.camera, s.shotSize, s.emotion, s.notes, fmtTime(s.start), `#${s.index}`]
+      return [s.description, s.dialogue, s.camera, s.shotSize, s.angle, s.environment, s.lighting, s.emotion, s.notes, (s.characters || []).map((c) => `${c.name} ${c.appearance} ${c.wardrobe}`).join(' '), fmtTime(s.start), `#${s.index}`]
         .filter(Boolean).join(' ').toLowerCase().includes(q);
     });
   }
@@ -3637,7 +3656,7 @@ expressionArc：[{time:"mm:ss", expression:"该时间点的表情变化"}]，只
       method: 'POST',
       headers: apiHeaders(),
       body: JSON.stringify({
-        model: state.settings.model,
+        model: state.settings.visionModel,
         temperature: .25,
         max_tokens: 1200,
         messages: [
@@ -4584,7 +4603,8 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
 
   function openSettings() {
     $('#api-base').value = state.settings.baseUrl || '';
-    $('#api-model').value = state.settings.model || '';
+    $('#api-vision-model').value = state.settings.visionModel || '';
+    $('#api-text-model').value = state.settings.textModel || '';
     $('#api-key').value = state.settings.apiKey || '';
     $('#opt-stream').checked = !!state.settings.stream;
     $('#opt-context').checked = !!state.settings.context;
@@ -4600,7 +4620,8 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
 
   function syncSettingsFromForm() {
     state.settings.baseUrl = $('#api-base').value.trim() || DEFAULT_SETTINGS.baseUrl;
-    state.settings.model = $('#api-model').value.trim() || DEFAULT_SETTINGS.model;
+    state.settings.visionModel = $('#api-vision-model').value.trim() || DEFAULT_SETTINGS.visionModel;
+    state.settings.textModel = $('#api-text-model').value.trim() || DEFAULT_SETTINGS.textModel;
     state.settings.apiKey = $('#api-key').value.trim();
     state.settings.stream = $('#opt-stream').checked;
     state.settings.context = $('#opt-context').checked;
@@ -4625,7 +4646,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       const res = await fetch(base, {
         method: 'POST',
         headers: apiHeaders(),
-        body: JSON.stringify({ model: state.settings.model, messages: [{ role: 'user', content: '只回复：ok' }], max_tokens: 4, temperature: 0 }),
+        body: JSON.stringify({ model: state.settings.textModel, messages: [{ role: 'user', content: '只回复：ok' }], max_tokens: 4, temperature: 0 }),
         signal: ctrl.signal
       });
       if (!res.ok) throw await apiError(res);
@@ -4669,7 +4690,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
         method: 'POST',
         headers: apiHeaders(),
         body: JSON.stringify({
-          model: state.settings.model,
+          model: state.settings.visionModel,
           temperature: 0,
           max_tokens: 8,
           messages: [{ role: 'user', content: [
@@ -4907,7 +4928,7 @@ ${shots}`;
         method: 'POST',
         headers: apiHeaders(),
         body: JSON.stringify({
-          model: state.settings.model,
+          model: state.settings.textModel,
           messages: history,
           stream: !!state.settings.stream,
           temperature: .65,
@@ -5230,7 +5251,7 @@ ${shots}`;
     // API / 设置
     $('#api-state').addEventListener('click', openSettings);
     $('#btn-assistant-settings').addEventListener('click', openSettings);
-    ['#api-base', '#api-model', '#api-key'].forEach((sel) => {
+    ['#api-base', '#api-vision-model', '#api-text-model', '#api-key'].forEach((sel) => {
       $(sel).addEventListener('input', syncSettingsFromForm);
     });
     ['#opt-stream', '#opt-context', '#opt-proxy'].forEach((sel) => $(sel).addEventListener('change', syncSettingsFromForm));
