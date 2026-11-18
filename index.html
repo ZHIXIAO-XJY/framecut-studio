@@ -1471,8 +1471,8 @@ h1.project-title button:hover{background:var(--panel-3)}
   };
   const SETTINGS_KEY = 'framecut.settings.v1';
   const MAX_FRAMES = 3200;
-  const SCENE_CUT_DISTANCE = 18;
-  const SCENE_MAX_SECONDS = 10;
+  const SCENE_CUT_DISTANCE = 40;
+  const SCENE_MAX_SECONDS = 15;
   const PAGE_SIZE = 120;
   const DB_NAME = 'framecut.local.v1';
   const DB_STORE = 'project';
@@ -2871,7 +2871,7 @@ h1.project-title button:hover{background:var(--panel-3)}
       const dist = prev?.metrics?.hash != null && cur?.metrics?.hash != null
         ? hashDistance(prev.metrics.hash, cur.metrics.hash) : null;
       const colorDist = colorDistance(prev?.metrics?.color, cur?.metrics?.color);
-      const cut = (dist != null && dist >= SCENE_CUT_DISTANCE) || colorDist >= 90;
+      const cut = (dist != null && dist >= SCENE_CUT_DISTANCE) || colorDist >= 220;
       const tooLong = cur.end - current[0].start >= SCENE_MAX_SECONDS;
       if (cut || tooLong) {
         groups.push(current);
@@ -3842,9 +3842,13 @@ lighting：光线（光源方向/色温/明暗对比/质感）
 emotion：本帧情绪与表演提示（一句）
 expressionArc：[{time:"mm:ss", expression:"该时间点的表情变化"}]，只写本镜头内可观察到的 1-3 个点
 人物特征只写画面可证据化的内容；同一人物在不同帧的称谓尽量保持一致。`;
+    const keyframes = (shot.keyframes?.length ? shot.keyframes : [{ t: shot.start, thumb: shot.thumb }])
+      .filter((k) => k.thumb).slice(0, 3);
     const userText = `项目：${state.project.title}
 时间码：${fmtTime(shot.start)} — ${fmtTime(shot.end)}（${(shot.end - shot.start).toFixed(2)} 秒）
-这是 ${shot.index} / ${state.project.shots.length} 个采样帧。请分析这一帧。`;
+这是第 ${shot.index} / ${state.project.shots.length} 个分镜头，由 ${shot.frameCount || 1} 个采样帧组成。请综合这些关键帧分析整段，而不是只看某一帧。
+已知字幕/台词（只作为证据，不要改写；没有则忽略）：
+${shot.dialogue || '（无）'}`;
     // 纯前端直连视觉接口；代理模式下由代理注入密钥。
     const res = await fetch(apiURL(), {
       method: 'POST',
@@ -3860,7 +3864,7 @@ expressionArc：[{time:"mm:ss", expression:"该时间点的表情变化"}]，只
             role: 'user',
             content: [
               { type: 'text', text: userText },
-              { type: 'image_url', image_url: { url: shot.thumb, detail: 'low' } }
+              ...keyframes.map((k) => ({ type: 'image_url', image_url: { url: k.thumb, detail: 'low' } }))
             ]
           }
         ]
@@ -4273,9 +4277,9 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
 
     push(`# 《${meta.title}》高精度脚本还原`);
     push('');
-    push(`> **片长**：[${meta.duration}]｜**画幅**：${meta.resolution}｜**帧率**：${projectMode().fps}fps｜**类型**：${meta.style}`);
-    push(`> **画面常驻元素**：FrameCut 本地抽帧；${p.shots.length} 个采样分镜`);
-    push(`> **核心内容**：${meta.theme}`);
+    push(`> **片长**：[${meta.duration}]｜**画幅**：${meta.resolution}｜**帧率**：${projectMode().fps}fps｜**类型**：${meta.style === '尚未填写' ? '短视频 / 口播（未设置）' : meta.style}`);
+    push(`> **画面常驻元素**：${p.notes || '未填写'}｜**抽帧**：${p.capturedFrames || p.shots.length} 个采样帧 → ${p.shots.length} 个分镜`);
+    push(`> **核心内容**：${meta.theme === '尚未填写' ? '未填写摘要' : meta.theme}`);
     push(`> **交付结构**：角色档案 → 造型变更 → 语气神态总表 → 逐分镜详细脚本 → 表演提示 → 数据校验`);
     push(`> **本版信息层级**：逐条含 🎙️声音质感 / 😐表情变化轨迹 / 👀眼神交互 / 🙌动作细节 / 🫧神态气场`);
     push('');
@@ -4288,7 +4292,10 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       push('> 暂无人物数据。先运行「AI 补全」，或在分镜编辑里填写人物特征。');
     } else {
       for (const c of profiles) {
-        push(`- **【${c.name}】**：${uniqJoin([...c.appearance], '；') || '外貌待补'}。**造型**：${uniqJoin([...c.wardrobe], '；') || '造型待补'}。**出现**：${fmtTime(c.first)}–${fmtTime(c.last)}，共 ${c.count} 个采样分镜。**神态关键词**：${uniqJoin([...c.expressions], '；') || '待补'}。`);
+        const app = [...c.appearance];
+        const ward = [...c.wardrobe];
+        const exp = [...c.expressions];
+        push(`- **【${c.name}】**：${app[0] || '外貌待补'}${app.length > 1 ? `（AI 另有 ${app.length - 1} 种描述差异）` : ''}。**造型**：${ward[0] || '造型待补'}${ward.length > 1 ? `（AI 另有 ${ward.length - 1} 种描述差异）` : ''}。**出现**：${fmtTime(c.first)}–${fmtTime(c.last)}，共 ${c.count} 个分镜。**神态关键词**：${uniqJoin(exp.slice(0, 3), '；') || '待补'}。`);
       }
     }
     push('');
@@ -4299,7 +4306,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     if (profiles.length) {
       for (const c of profiles) {
         const w = [...c.wardrobe];
-        push(`| ${mdCell(c.name)} | ${mdCell(w[0] || '待补')} | ${mdCell(w[1] || '—')} | ${w.length > 1 ? '片中出现换装，需逐段复核' : '全片未换装'} |`);
+        push(`| ${mdCell(c.name)} | ${mdCell(w[0] || '待补')} | ${mdCell(w[1] || '—')} | ${w.length > 1 ? 'AI 多次描述有差异，需关键帧复核是否换装' : '全片同一套'} |`);
       }
     } else {
       push('| — | — | — | — |');
@@ -4317,7 +4324,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
         const tones = dialogueRows.filter((d) => d.speaker === c.name && d.tone).map((d) => d.tone);
         const shotsOf = p.shots.filter((s) => (s.characters || []).some((x) => x.name === c.name));
         const emotions = shotsOf.map((s) => s.emotion).filter(Boolean);
-        push(`| ${mdCell(c.name)} | ${mdCell(uniqJoin(tones, ' / ') || '待补')} | ${mdCell(emotions[0] || '待补')} | ${mdCell(c.expressions.size ? uniqJoin([...c.expressions], ' / ') : '待补')} | ${mdCell(c.expressions.size ? uniqJoin([...c.expressions], ' / ') : '待补')} | ${mdCell(uniqJoin(emotions, ' / ') || '待补')} |`);
+        push(`| ${mdCell(c.name)} | ${mdCell(uniqJoin(tones.slice(0, 4), ' / ') || '待补')} | ${mdCell(emotions.slice(0, 2).join(' / ') || '待补')} | ${mdCell(c.expressions.size ? uniqJoin([...c.expressions].slice(0, 3), ' / ') : '待补')} | ${mdCell(c.expressions.size ? uniqJoin([...c.expressions].slice(0, 3), ' / ') : '待补')} | ${mdCell(uniqJoin(emotions.slice(0, 3), ' / ') || '待补')} |`);
       }
     } else {
       push('| — | — | — | — | — | — |');
@@ -4345,16 +4352,26 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       }
       push(`**人物**：${chars.length ? chars.map((c) => `【${c.name}】${c.appearance || ''}${c.wardrobe ? '（' + c.wardrobe + '）' : ''}`).join('；') : '画面无可见人物 / 待补'}`);
       push('');
-      if (dLines.length) {
-        for (const d of dLines) {
+      const subtitleParts = shot.dialogue ? String(shot.dialogue).split(/\s*\/\s*|\n+/).map((s) => s.trim()).filter(Boolean) : [];
+      const dialogueRows = subtitleParts.length > dLines.length
+        ? subtitleParts.map((text) => {
+            const hit = dLines.find((d) => d.text && (d.text.includes(text) || text.includes(d.text)));
+            return { speaker: chars[0]?.name || '未知', text, tone: hit?.tone || shot.emotion || '' };
+          })
+        : dLines;
+      if (dialogueRows.length) {
+        for (const d of dialogueRows) {
           push(`**【${d.speaker || '未知'}】**（语气：${d.tone || shot.emotion || '待补'}）`);
           push(`"${d.text}"`);
           push('');
         }
       } else if (shot.dialogue) {
-        push(`**【未知】**（语气：${shot.emotion || '待补'}）`);
-        push(`"${shot.dialogue}"`);
-        push('');
+        const parts = String(shot.dialogue).split(/\s*\/\s*|\n+/).map((s) => s.trim()).filter(Boolean);
+        for (const text of parts) {
+          push(`**【${chars[0]?.name || '未知'}】**（语气：${shot.emotion || '待补'}）`);
+          push(`"${text}"`);
+          push('');
+        }
       } else {
         push('**台词**：无台词 / 字幕。');
         push('');
@@ -4362,7 +4379,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
 
       const actions = chars.map((c) => c.action).filter(Boolean);
       const looks = actions.filter((a) => /看|视|盯|望|目光|眼/.test(a));
-      const tones = dLines.map((d) => d.tone).filter(Boolean);
+      const tones = dialogueRows.map((d) => d.tone).filter(Boolean);
       const expressions = chars.map((c) => c.expression).filter(Boolean);
       const arcs = (shot.expressionArc || []).filter((e) => e.expression);
       push(`- **🎙️ 声音质感**：${mdCell(uniqJoin([...tones, shot.emotion], '；') || '待补（无台词时记录环境声/气息）')}`);
