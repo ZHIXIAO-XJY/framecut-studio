@@ -1,0 +1,12 @@
+name = "framecut-api"
+main = "index.js"
+compatibility_date = "2025-01-01"
+
+# 建议在 Cloudflare Dashboard 的 Worker 设置里添加：
+# ALLOWED_ORIGINS = "https://your-site.pages.dev,https://your-domain.com"
+#
+# 密钥不要写在这里，用：
+#   wrangler secret put DEEPSEEK_API_KEY
+#
+# 可选：换上游（默认 https://api.deepseek.com）
+# DEEPSEEK_BASE = "https://api.deepseek.com"

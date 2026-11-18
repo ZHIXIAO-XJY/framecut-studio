@@ -1,0 +1,35 @@
+{
+  "id": "./",
+  "name": "FrameCut 拆镜台",
+  "short_name": "FrameCut",
+  "description": "浏览器内视频抽帧、分镜质检、AI 补全与 Markdown/PDF 交付。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "background_color": "#090a0c",
+  "theme_color": "#090a0c",
+  "lang": "zh-CN",
+  "orientation": "any",
+  "categories": ["productivity", "video"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
