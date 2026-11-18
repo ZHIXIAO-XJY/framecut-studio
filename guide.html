@@ -305,11 +305,11 @@ python -m http.server 8080</code></pre>
         <thead><tr><th>字段</th><th>示例</th></tr></thead>
         <tbody>
           <tr><td>BASE URL</td><td><code>https://api.deepseek.com/v1</code></td></tr>
-          <tr><td>MODEL NAME</td><td><code>deepseek-v4.1-flash-high</code></td></tr>
+          <tr><td>MODEL NAME</td><td><code>deepseek-flash</code>（官方支持图片；v4-pro 不支持）</td></tr>
           <tr><td>API KEY</td><td>你自己的 Key</td></tr>
         </tbody>
       </table>
-      <p>Key 只存本机 localStorage；默认不内置任何 Key。点「测试连接」确认端点可用。</p>
+      <p>Key 只存本机 localStorage；默认不内置任何 Key。先点「测试文字」，再点「测试图片」——批量补全发的是图片，文字测试通过不代表图片能过。</p>
 
       <h3>代理模式（公开部署推荐）</h3>
       <p>Base URL 填你的代理，例如：</p>
@@ -345,6 +345,9 @@ python -m http.server 8080</code></pre>
         <img src="guide-export.png" alt="Markdown 导出：ZIP、单文件内嵌、纯文字" loading="lazy" />
         <figcaption>Markdown 三种导出模式；长项目建议 ZIP</figcaption>
       </figure>
+      <h3>统一交付文档</h3>
+      <p>现在的 Markdown / PDF 会先把 AI 结果聚合成一份完整文档：<strong>人物档案</strong>（外貌、服装、出现区间、神态关键词）、<strong>台词与对话</strong>（时间、说话人、台词、语气）、<strong>全片分镜表</strong>（景别 / 视角 / 运镜 / 环境 / 光线 / 人物 / 神态变化）。</p>
+
       <h3>Markdown</h3>
       <ol>
         <li><strong>Markdown + 帧图 ZIP</strong>：<code>.md</code> + <code>frames/001.jpg</code>，适合长项目/交付/GitHub</li>
@@ -402,7 +405,7 @@ python -m http.server 8080</code></pre>
       <details><summary>抽帧很慢？</summary><p>长视频用快拆；关闭其他占内存页面；1376 帧约 89 秒属正常。</p></details>
       <details><summary>竖屏画面被裁？</summary><p>当前卡片用 4:5 容器 + <code>object-fit: contain</code>；刷新到最新版。</p></details>
       <details><summary>所有帧都「待确认」？</summary><p>先看是不是「字段待补」；补描述后再全检。</p></details>
-      <details><summary>AI 没反应？</summary><p>检查 Key/代理、模型名、网络、CORS；先点「测试连接」。</p></details>
+      <details><summary>AI 没反应？</summary><p>先点「测试文字」，再点「测试图片」。图片失败通常是模型不支持 image_url；批量弹窗现在会直接显示具体错误。</p></details>
       <details><summary>AI 覆盖了描述？</summary><p>编辑弹窗里点「撤销 AI」。</p></details>
       <details><summary>PDF 空白 / 没底色？</summary><p>用 Chrome/Edge；打印时勾选「背景图形」；先导出小范围测试。</p></details>
       <details><summary>刷新后项目没了？</summary><p>检查是否清了站点数据/换了浏览器；养成导出项目 JSON 的习惯。</p></details>
