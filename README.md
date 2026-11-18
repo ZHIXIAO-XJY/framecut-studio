@@ -11,6 +11,7 @@
 - 批量 AI 补全、人物档案、台词时间线、景别/视角/环境/神态全表
 - 统一交付文档：Markdown / PDF / ZIP / 项目 JSON
 - 文字/图片双接口测试，批量失败直接显示具体原因
+- 默认关闭推理，避免 `reasoning_content` 吃光 token 导致 JSON 为空
 - 深色/浅色、桌面/移动端响应式
 - **PWA**：HTTPS 下可安装、可离线打开（首次加载后缓存应用壳）
 - **API 代理模板**：Cloudflare Worker，隐藏 Key，绕开 CORS / 客户端 IP 限制

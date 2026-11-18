@@ -311,6 +311,7 @@ python -m http.server 8080</code></pre>
         </tbody>
       </table>
       <p>Key 只存本机 localStorage；默认不内置任何 Key。先点「测试文字」，再点「测试图片」——批量补全发的是图片，文字测试通过不代表图片能过。</p>
+      <div class="note"><b>保持「关闭推理」开启：</b>DeepSeek V4.x 默认先输出 <code>reasoning_content</code>，JSON 提取时可能把 token 用完、<code>content</code> 为空；关闭后批量才稳定。</div>
 
       <h3>代理模式（公开部署推荐）</h3>
       <p>Base URL 填你的代理，例如：</p>

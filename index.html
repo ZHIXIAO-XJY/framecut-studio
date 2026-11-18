@@ -978,6 +978,10 @@ h1.project-title button:hover{background:var(--panel-3)}
           <label class="switch"><input type="checkbox" id="opt-context" checked /><i></i></label>
         </div>
         <div class="toggle-row">
+          <div><span>关闭推理（推荐）</span><small>DeepSeek V4.x 默认先输出 reasoning，JSON 提取可能 content 为空；关掉更稳</small></div>
+          <label class="switch"><input type="checkbox" id="opt-reasoning-off" checked /><i></i></label>
+        </div>
+        <div class="toggle-row">
           <div><span>代理模式</span><small>Base URL 指向自己的代理，由服务端注入 Key；本页不发送 Authorization</small></div>
           <label class="switch"><input type="checkbox" id="opt-proxy" /><i></i></label>
         </div>
@@ -1422,6 +1426,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     baseUrl: 'https://api.deepseek.com/v1',
     visionModel: 'deepseek-flash',
     textModel: 'deepseek-v4-pro',
+    reasoningOff: true,
     stream: true,
     context: true,
     proxyMode: false,
@@ -3306,6 +3311,11 @@ h1.project-title button:hover{background:var(--panel-3)}
     return headers;
   }
 
+  // DeepSeek V4.x 默认先输出 reasoning_content；JSON 提取时关掉推理，避免 content 为空。
+  function reasoningOffField() {
+    return state.settings.reasoningOff === false ? {} : { reasoning_effort: 'none' };
+  }
+
   async function apiError(res) {
     let detail = '';
     try {
@@ -3657,6 +3667,7 @@ expressionArc：[{time:"mm:ss", expression:"该时间点的表情变化"}]，只
       headers: apiHeaders(),
       body: JSON.stringify({
         model: state.settings.visionModel,
+        ...reasoningOffField(),
         temperature: .25,
         max_tokens: 1200,
         messages: [
@@ -3674,10 +3685,14 @@ expressionArc：[{time:"mm:ss", expression:"该时间点的表情变化"}]，只
     });
     if (!res.ok) throw await apiError(res);
     const data = await res.json();
-    let content = data.choices?.[0]?.message?.content || '';
+    const message = data.choices?.[0]?.message || {};
+    let content = message.content || '';
     if (Array.isArray(content)) content = content.map((c) => c.text || '').join('\n');
+    if (!String(content).trim() && message.reasoning_content) {
+      throw new Error('模型只返回了 reasoning_content，content 为空（推理 token 用尽）。请在 API 设置里关闭「推理」，或提高 max_tokens。');
+    }
     const match = String(content).match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('模型没有返回可解析的 JSON。请确认该模型支持图像输入。');
+    if (!match) throw new Error('模型没有返回可解析的 JSON。请确认该模型支持图像输入，并关闭「推理」后重试。');
     return JSON.parse(match[0]);
   }
 
@@ -4608,6 +4623,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     $('#api-key').value = state.settings.apiKey || '';
     $('#opt-stream').checked = !!state.settings.stream;
     $('#opt-context').checked = !!state.settings.context;
+    $('#opt-reasoning-off').checked = state.settings.reasoningOff !== false;
     $('#opt-proxy').checked = !!state.settings.proxyMode;
     $('#test-api-result').textContent = '';
     $('#test-api-result').className = 'help';
@@ -4625,6 +4641,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     state.settings.apiKey = $('#api-key').value.trim();
     state.settings.stream = $('#opt-stream').checked;
     state.settings.context = $('#opt-context').checked;
+    state.settings.reasoningOff = $('#opt-reasoning-off').checked;
     state.settings.proxyMode = $('#opt-proxy').checked;
     persistSettings();
     renderApiState();
@@ -4646,7 +4663,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       const res = await fetch(base, {
         method: 'POST',
         headers: apiHeaders(),
-        body: JSON.stringify({ model: state.settings.textModel, messages: [{ role: 'user', content: '只回复：ok' }], max_tokens: 4, temperature: 0 }),
+        body: JSON.stringify({ model: state.settings.textModel, ...reasoningOffField(), messages: [{ role: 'user', content: '只回复：ok' }], max_tokens: 16, temperature: 0 }),
         signal: ctrl.signal
       });
       if (!res.ok) throw await apiError(res);
@@ -4691,8 +4708,9 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
         headers: apiHeaders(),
         body: JSON.stringify({
           model: state.settings.visionModel,
+          ...reasoningOffField(),
           temperature: 0,
-          max_tokens: 8,
+          max_tokens: 16,
           messages: [{ role: 'user', content: [
             { type: 'text', text: '这张图里有两个字母，只回复这两个字母。' },
             { type: 'image_url', image_url: { url: dataUrl, detail: 'low' } }
@@ -4929,6 +4947,7 @@ ${shots}`;
         headers: apiHeaders(),
         body: JSON.stringify({
           model: state.settings.textModel,
+          ...reasoningOffField(),
           messages: history,
           stream: !!state.settings.stream,
           temperature: .65,
@@ -5254,7 +5273,7 @@ ${shots}`;
     ['#api-base', '#api-vision-model', '#api-text-model', '#api-key'].forEach((sel) => {
       $(sel).addEventListener('input', syncSettingsFromForm);
     });
-    ['#opt-stream', '#opt-context', '#opt-proxy'].forEach((sel) => $(sel).addEventListener('change', syncSettingsFromForm));
+    ['#opt-stream', '#opt-context', '#opt-reasoning-off', '#opt-proxy'].forEach((sel) => $(sel).addEventListener('change', syncSettingsFromForm));
     $('#btn-key-eye').addEventListener('click', () => {
       const input = $('#api-key');
       input.type = input.type === 'password' ? 'text' : 'password';
