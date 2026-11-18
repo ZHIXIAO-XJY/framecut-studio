@@ -1,5 +1,8 @@
 # FrameCut 拆镜台 · 网页版（PWA）
 
+**在线使用**：https://zhixiao-xjy.github.io/framecut-studio/  
+**图文教程**：https://zhixiao-xjy.github.io/framecut-studio/guide.html
+
 纯静态网页，零构建、无后端、无数据库。部署到任意 HTTPS 静态主机即可用；页面不绑定本机 IP，不依赖 Windows/本机路径，手机、平板、Mac、Windows 浏览器都能打开。
 
 ## 特性
