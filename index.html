@@ -3580,6 +3580,115 @@ h1.project-title button:hover{background:var(--panel-3)}
     return list;
   }
 
+  function reconcileDialogue(shots, frames, subs) {
+    const entries = [];
+    if (subs?.length) {
+      for (const s of subs) {
+        if (s.text) entries.push({ t: s.start, text: s.text, source: 'subtitle' });
+      }
+    } else if (frames?.length) {
+      for (const f of frames) {
+        const parts = String(f.dialogue || '').split(/\s*\/\s*/).map((x) => x.trim()).filter(Boolean);
+        for (const text of parts) entries.push({ t: f.start, text, source: 'ocr' });
+      }
+    } else {
+      for (const shot of shots) {
+        const parts = String(shot.dialogue || '').split(/\s*\/\s*/).map((x) => x.trim()).filter(Boolean);
+        for (const text of parts) entries.push({ t: shot.start, text, source: shot.dialogueSource || 'subtitle' });
+      }
+    }
+    const unique = [];
+    for (const e of entries) {
+      const n = String(e.text).replace(/\s+/g, '');
+      if (!n) continue;
+      if (unique.some((x) => x.n === n && Math.abs(x.t - e.t) < 2.0)) continue;
+      unique.push({ ...e, n });
+    }
+    unique.sort((a, b) => a.t - b.t);
+    let attached = 0;
+    for (const e of unique) {
+      let shot = shots.find((s) => e.t >= s.start - .01 && e.t < s.end - .01);
+      if (!shot) shot = shots.reduce((best, s) => Math.abs(s.start - e.t) < Math.abs(best.start - e.t) ? s : best, shots[0]);
+      if (!shot) continue;
+      const existing = String(shot.dialogue || '').split(/\s*\/\s*/).map((x) => x.trim()).filter(Boolean);
+      shot.dialogue = mergeDialogueTexts([...existing, e.text]).join(' / ');
+      if (!shot.dialogueSource) shot.dialogueSource = e.source || 'subtitle';
+      attached++;
+    }
+    return { total: unique.length, attached, missing: Math.max(0, unique.length - attached) };
+  }
+
+  async function resolveCastNames(shots) {
+    const profiles = characterProfiles(shots).slice(0, 20);
+    if (!profiles.length) return null;
+    const rows = profiles.map((p, i) => {
+      const apps = [...p.appearance].slice(0, 2).join(' / ');
+      const ward = [...p.wardrobe].slice(0, 2).join(' / ');
+      return `${i + 1}. 系统名=${p.name}；出现${p.count}次；时间${fmtTime(p.first)}-${fmtTime(p.last)}；外形=${apps || '待补'}；造型=${ward || '待补'}`;
+    });
+    const lines = dialogueTimeline(shots).slice(0, 260).map((r) => `[${fmtTime(r.shot.start)}] ${r.speaker || '—'}：${r.text}`).join('\n');
+    const prompt = `你是短剧剧本统筹。下面是系统按画面识别的角色（可能把同一个人拆成“女子/女孩/年轻女性/老年女性”等泛称），以及全片台词。
+请根据台词里的真实姓名、称呼、亲属关系，把同一个人合并，并给每个角色一个统一名字。
+规则：
+1. 台词里出现真实姓名或明确称呼（如“江宇”“顾总”“林父”“明珠”“沈小姐”）时，必须用这个名字。
+2. 没有真实姓名时，用明确身份（女主/男主/母亲/父亲/姐姐/助理/医生），不要用“女子/男子/老人/小孩/女孩”这种泛称。
+3. 同一角色只能出现一次；aliases 必须覆盖它对应的系统名。
+4. 只输出 JSON，不要解释：
+{"characters":[{"canonical":"江宇","aliases":["男子","年轻男子"],"role":"男主"}]}
+
+角色列表：
+${rows.join('\n')}
+
+全片台词：
+${lines || '（无台词）'}`;
+    const res = await fetch(apiURL(), {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({
+        model: state.settings.textModel,
+        ...reasoningOffField(),
+        temperature: .1,
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    if (!res.ok) throw await apiError(res);
+    const data = await res.json();
+    let content = data.choices?.[0]?.message?.content || '';
+    if (Array.isArray(content)) content = content.map((c) => c.text || '').join('\n');
+    const m = String(content).match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('角色名归一没有返回 JSON');
+    const parsed = JSON.parse(m[0]);
+    const map = new Map();
+    for (const c of parsed.characters || []) {
+      const canonical = String(c.canonical || '').trim();
+      if (!canonical) continue;
+      for (const a of [c.name, ...(c.aliases || [])]) {
+        const alias = String(a || '').trim();
+        if (alias) map.set(alias, canonical);
+      }
+    }
+    if (!map.size) return null;
+    for (const shot of shots) {
+      const byName = new Map();
+      for (const c of shot.characters || []) {
+        const name = map.get(c.name) || c.name;
+        if (!name) continue;
+        if (!byName.has(name)) byName.set(name, { ...c, name });
+        else {
+          const old = byName.get(name);
+          for (const k of ['appearance', 'wardrobe', 'expression', 'action']) if (!old[k] && c[k]) old[k] = c[k];
+        }
+      }
+      shot.characters = [...byName.values()];
+      for (const d of shot.dialogueLines || []) {
+        if (d.speaker && map.has(d.speaker)) d.speaker = map.get(d.speaker);
+      }
+    }
+    state.project.castMap = [...map.entries()];
+    return map;
+  }
+
   async function composeShots() {
     if (state.ui.composing) return;
     const p = state.project;
@@ -3613,6 +3722,7 @@ h1.project-title button:hover{background:var(--panel-3)}
           setComposeProgress(3 + (doneFrames / totalFrames) * 18, '提取人物台词', `${doneFrames} / ${totalFrames} 帧 · OCR ${calls} 次`, 0);
         });
         attachDialogueToShots(p.shots, state.rawFrames);
+        p.dialogueAudit = reconcileDialogue(p.shots, state.rawFrames, state.pendingSubs || []);
         renderAll();
       }
       for (const shot of p.shots) {
@@ -3674,12 +3784,20 @@ h1.project-title button:hover{background:var(--panel-3)}
       const before = p.shots.length;
       p.shots = mergeDuplicateShots(p.shots);
       const merged = before - p.shots.length;
+      p.dialogueAudit = reconcileDialogue(p.shots, state.rawFrames || [], state.pendingSubs || []);
+      setComposeProgress(90, '角色名称归一', '按台词中的姓名/称谓统一角色，合并同一人…', failed);
+      try {
+        await resolveCastNames(p.shots);
+      } catch (e) {
+        console.warn('cast name resolve failed', e);
+      }
       applyAutoQC(p.shots);
       p.segmentSource = 'compose-auto';
       renderAll();
       scheduleAutosave();
       setComposeProgress(100, state.ui.composeStop ? '已停止合成' : '分镜合成完成', `${p.shots.length} 个分镜 · 合并 ${merged} 个重复段`, failed);
-      toast(`分镜合成${state.ui.composeStop ? '已停止' : '完成'}：${p.shots.length} 个分镜，合并重复 ${merged} 个，失败 ${failed} 个。`, failed ? 'warn' : 'success', 6500);
+      const audit = p.dialogueAudit || { total: 0, attached: 0 };
+      toast(`分镜合成${state.ui.composeStop ? '已停止' : '完成'}：${p.shots.length} 个分镜，合并重复 ${merged} 个；台词 ${audit.attached}/${audit.total} 条入镜，失败 ${failed} 个。`, failed || audit.missing ? 'warn' : 'success', 7000);
       setTimeout(() => { $('#compose-progress').hidden = true; }, 3200);
     } catch (e) {
       console.error(e);
@@ -4317,7 +4435,11 @@ h1.project-title button:hover{background:var(--panel-3)}
       $('#btn-batch-stop').hidden = true;
       $('#btn-batch-close').disabled = false;
       setText('#batch-progress-label', cancelled ? '已停止' : '补全完成');
-      if (!cancelled && completedGroups > 0 && $('#batch-auto-qc')?.checked) applyAutoQC(state.project.shots);
+      if (!cancelled && completedGroups > 0) {
+        state.project.dialogueAudit = reconcileDialogue(state.project.shots, state.rawFrames || [], state.pendingSubs || []);
+        try { await resolveCastNames(state.project.shots); } catch (e) { console.warn('cast name resolve failed', e); }
+        if ($('#batch-auto-qc')?.checked) applyAutoQC(state.project.shots);
+      }
       renderAll();
       updateBatchNext();
       scheduleAutosave();
@@ -4343,7 +4465,7 @@ h1.project-title button:hover{background:var(--panel-3)}
   }
 
   async function requestShotAnalysis(shot, signal) {
-    const system = `你是严谨的影视分镜师与选角导演。请只根据给定的单帧画面与时间码，输出可复刻的画面信息。禁止编造画面里不存在的人物、台词、品牌和身份关系；看不清的名字写“男子/女子/老人/小孩”等可见称谓，不要猜真名。若画面没有台词，dialogue 与 dialogueLines 留空。
+    const system = `你是严谨的影视分镜师与选角导演。请只根据给定的画面、时间码和已知字幕，输出可复刻的画面信息。禁止编造画面里不存在的人物、台词、品牌和身份关系。人物 name 必须优先使用“已知字幕/台词”中出现的真实姓名或明确称谓（如江宇、顾总、林父、沈小姐、医生）；字幕没有名字时，用明确角色身份（女主/男主/父亲/母亲/助理/医生），禁止用“女子/男子/老人/小孩”这类泛称。不要仅凭脸猜真名。若画面没有台词，dialogue 与 dialogueLines 留空，绝不能改写已知字幕。
 只输出合法 JSON，不要 Markdown 代码块。字段：
 description：画面描述（人物/动作/构图/环境/光线，2-4 句）
 dialogue：本帧可见台词或字幕的纯文本，没有则空字符串
@@ -4630,10 +4752,18 @@ ${shot.dialogue || '（无）'}`;
     const rows = [];
     for (const shot of shots) {
       const lines = (shot.dialogueLines || []).filter((d) => d && d.text);
-      if (lines.length) {
-        for (const d of lines) rows.push({ shot, speaker: d.speaker || '—', text: d.text, tone: d.tone || '' });
-      } else if (shot.dialogue) {
-        rows.push({ shot, speaker: '—', text: shot.dialogue, tone: '' });
+      const subtitleTexts = String(shot.dialogue || '').split(/\s*\/\s*|\n+/).map((s) => s.trim()).filter(Boolean);
+      const allTexts = mergeDialogueTexts([...subtitleTexts, ...lines.map((d) => d.text)]);
+      if (allTexts.length) {
+        for (const text of allTexts) {
+          const hit = lines.find((d) => d.text && (d.text.includes(text) || text.includes(d.text)));
+          rows.push({
+            shot,
+            speaker: hit?.speaker || shot.characters?.[0]?.name || '—',
+            text,
+            tone: hit?.tone || ''
+          });
+        }
       }
     }
     return rows;
@@ -4810,7 +4940,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
         const app = [...c.appearance];
         const ward = [...c.wardrobe];
         const exp = [...c.expressions];
-        push(`- **【${c.name}】**：${app[0] || '外貌待补'}${app.length > 1 ? `（AI 另有 ${app.length - 1} 种描述差异）` : ''}。**造型**：${ward[0] || '造型待补'}${ward.length > 1 ? `（AI 另有 ${ward.length - 1} 种描述差异）` : ''}。**出现**：${fmtTime(c.first)}–${fmtTime(c.last)}，共 ${c.count} 个分镜。**神态关键词**：${uniqJoin(exp.slice(0, 3), '；') || '待补'}。`);
+        push(`- **【${c.name}】**：${app[0] || '外貌待补'}${app.length > 1 ? '（多次识别有差异，以关键帧为准）' : ''}。**造型**：${ward[0] || '造型待补'}${ward.length > 1 ? '（多次识别有差异，以关键帧为准）' : ''}。**出现**：${fmtTime(c.first)}–${fmtTime(c.last)}，共 ${c.count} 个分镜。**神态关键词**：${uniqJoin(exp.slice(0, 3), '；') || '待补'}。`);
       }
     }
     push('');
@@ -4871,7 +5001,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       const dialogueRows = subtitleParts.length > dLines.length
         ? subtitleParts.map((text) => {
             const hit = dLines.find((d) => d.text && (d.text.includes(text) || text.includes(d.text)));
-            return { speaker: chars[0]?.name || '未知', text, tone: hit?.tone || shot.emotion || '' };
+            return { speaker: hit?.speaker || (chars.length === 1 ? chars[0].name : '未知'), text, tone: hit?.tone || shot.emotion || '' };
           })
         : dLines;
       if (dialogueRows.length) {
