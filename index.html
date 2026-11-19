@@ -3346,6 +3346,148 @@ h1.project-title button:hover{background:var(--panel-3)}
     $('#compose-fill').style.width = `${Math.max(0, Math.min(100, pct))}%`;
   }
 
+  async function cropSubtitleFrame(thumb) {
+    const img = await loadThumb(thumb);
+    if (!img) return null;
+    const w = img.width || img.naturalWidth || 720;
+    const h = img.height || img.naturalHeight || 1280;
+    const cropH = Math.round(h * .22);
+    const canvas = document.createElement('canvas');
+    canvas.width = 360;
+    canvas.height = Math.round(cropH * (360 / w));
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, h - cropH, w, cropH, 0, 0, canvas.width, canvas.height);
+    const sigCanvas = document.createElement('canvas');
+    sigCanvas.width = 64; sigCanvas.height = 18;
+    const sx = sigCanvas.getContext('2d', { willReadFrequently: true });
+    sx.drawImage(canvas, 0, 0, 64, 18);
+    const d = sx.getImageData(0, 0, 64, 18).data;
+    let sig = '';
+    for (let y = 0; y < 18; y++) {
+      for (let x = 0; x < 63; x++) {
+        const i = (y * 64 + x) * 4;
+        const j = i + 4;
+        const a = d[i] * .299 + d[i + 1] * .587 + d[i + 2] * .114;
+        const b = d[j] * .299 + d[j + 1] * .587 + d[j + 2] * .114;
+        sig += a > b ? '1' : '0';
+      }
+    }
+    return { dataUrl: canvas.toDataURL('image/jpeg', .84), sig };
+  }
+
+  async function ocrSubtitleFrame(dataUrl) {
+    const prompt = '只提取这张画面底部的中文字幕/人物台词，逐行原样输出，不要改写、不要翻译、不要解释。' +
+      '如果底部没有字幕，只输出 EMPTY。不要提取顶部贴纸、商品角标或画面上的其他文字。';
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 22000);
+    let res;
+    try {
+      res = await fetch(apiURL(), {
+        method: 'POST',
+        headers: apiHeaders(),
+        body: JSON.stringify({
+          model: state.settings.visionModel,
+          ...reasoningOffField(),
+          temperature: 0,
+          max_tokens: 400,
+          messages: [{ role: 'user', content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } }
+          ] }]
+        }),
+        signal: ctrl.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) throw await apiError(res);
+    const data = await res.json();
+    let text = data.choices?.[0]?.message?.content || '';
+    if (Array.isArray(text)) text = text.map((c) => c.text || '').join('\n');
+    text = String(text).trim().replace(/^["'“”‘’]|["'“”‘’]$/g, '').trim();
+    if (!text || /^(EMPTY|无字幕|没有字幕|空)$/i.test(text)) return '';
+    return text.split(/\n+/).map((s) => s.replace(/^(字幕|台词)[:：]\s*/, '').trim()).filter(Boolean).join(' / ');
+  }
+
+  async function extractDialogueFromFrames(frames, onProgress) {
+    let lastSig = '';
+    let lastText = '';
+    let calls = 0;
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i];
+      if (!frame.thumb) continue;
+      if (i % 2 === 1 && i !== frames.length - 1 && lastSig) {
+        frame.dialogue = lastText;
+        frame.dialogueSource = lastText ? 'ocr' : '';
+        continue;
+      }
+      const crop = await cropSubtitleFrame(frame.thumb);
+      if (!crop) continue;
+      const changed = !lastSig || hashDistance(lastSig, crop.sig) > 10;
+      if (!changed) {
+        frame.dialogue = lastText;
+        frame.dialogueSource = lastText ? 'ocr' : '';
+        continue;
+      }
+      lastSig = crop.sig;
+      try {
+        const text = await ocrSubtitleFrame(crop.dataUrl);
+        calls++;
+        lastText = text;
+        frame.dialogue = text;
+        frame.dialogueSource = text ? 'ocr' : '';
+      } catch (e) {
+        console.warn('subtitle OCR failed', frame.index, e);
+        frame.dialogue = '';
+        lastText = '';
+        lastSig = '';
+      }
+      onProgress?.(i + 1, frames.length, calls);
+      await sleep(100);
+    }
+    return calls;
+  }
+
+  function mergeDialogueTexts(texts) {
+    const out = [];
+    for (const raw of texts) {
+      const t = String(raw || '').trim();
+      if (!t) continue;
+      const n = t.replace(/\s+/g, '');
+      const exact = out.findIndex((x) => x.replace(/\s+/g, '') === n);
+      if (exact >= 0) {
+        if (t.length > out[exact].length) out[exact] = t;
+        continue;
+      }
+      const contain = out.findIndex((x) => {
+        const xn = x.replace(/\s+/g, '');
+        return xn.includes(n) || n.includes(xn);
+      });
+      if (contain >= 0) {
+        if (t.length > out[contain].length) out[contain] = t;
+        continue;
+      }
+      out.push(t);
+    }
+    return out;
+  }
+
+  function attachDialogueToShots(shots, frames) {
+    for (const shot of shots) {
+      const texts = [];
+      for (const f of frames) {
+        if (f.start < shot.start - .001 || f.start >= shot.end - .001) continue;
+        const t = String(f.dialogue || '').trim();
+        if (t) texts.push(...t.split(/\s*\/\s*/).map((x) => x.trim()).filter(Boolean));
+      }
+      const unique = mergeDialogueTexts(texts);
+      if (unique.length) {
+        shot.dialogue = unique.join(' / ');
+        shot.dialogueSource = 'ocr';
+      }
+    }
+  }
+
   function dedupeShotDialogue(shot) {
     if (!Array.isArray(shot.dialogueLines)) shot.dialogueLines = [];
     const seen = new Set();
@@ -3356,7 +3498,7 @@ h1.project-title button:hover{background:var(--panel-3)}
       return true;
     });
     const parts = String(shot.dialogue || '').split(/\s*\/\s*|\n+/).map((s) => s.trim()).filter(Boolean);
-    shot.dialogue = [...new Set(parts)].join(' / ');
+    shot.dialogue = mergeDialogueTexts(parts).join(' / ');
   }
 
   function contentBigrams(text) {
@@ -3461,14 +3603,22 @@ h1.project-title button:hover{background:var(--panel-3)}
     $('#btn-compose-stop').hidden = false;
     $('#btn-start').disabled = true;
     let done = 0, failed = 0;
-    setComposeProgress(2, '开始分镜合成', `共 ${shots.length} 个分镜，逐镜补全`, 0);
+    setComposeProgress(2, '开始分镜合成', `共 ${shots.length} 个分镜，先提取台词`, 0);
     try {
+      if (state.rawFrames?.length && !state.pendingSubs.length) {
+        setComposeProgress(3, '提取人物台词', '逐帧识别底部字幕，字幕优先，不让 AI 改写…', 0);
+        await extractDialogueFromFrames(state.rawFrames, (doneFrames, totalFrames, calls) => {
+          setComposeProgress(3 + (doneFrames / totalFrames) * 18, '提取人物台词', `${doneFrames} / ${totalFrames} 帧 · OCR ${calls} 次`, 0);
+        });
+        attachDialogueToShots(p.shots, state.rawFrames);
+        renderAll();
+      }
       for (const shot of p.shots) {
         if (state.ui.composeStop) break;
         dedupeShotDialogue(shot);
         if (shot.aiAnalyzed && !shotNeedsFields(shot)) {
           done++;
-          setComposeProgress(4 + (done / p.shots.length) * 78, '分镜补全', `${done} / ${p.shots.length} 分镜`, failed);
+          setComposeProgress(22 + (done / p.shots.length) * 62, '分镜补全', `${done} / ${p.shots.length} 分镜`, failed);
           continue;
         }
         let parsed = null;
@@ -3492,7 +3642,7 @@ h1.project-title button:hover{background:var(--panel-3)}
         }
         done++;
         replaceShotCard(shot);
-        setComposeProgress(4 + (done / p.shots.length) * 78, '分镜补全', `${done} / ${p.shots.length} 分镜 · #${String(shot.index).padStart(3, '0')}`, failed);
+        setComposeProgress(22 + (done / p.shots.length) * 62, '分镜补全', `${done} / ${p.shots.length} 分镜 · #${String(shot.index).padStart(3, '0')}`, failed);
         await sleep(140);
       }
 
@@ -3901,8 +4051,10 @@ h1.project-title button:hover{background:var(--panel-3)}
   }
 
   function applyAIFields(shot, parsed, overwrite) {
+    const preserveDialogue = shot.dialogueSource === 'subtitle' || shot.dialogueSource === 'ocr' || Boolean((shot.dialogue || '').trim());
     const assign = (key, value, source) => {
       if (!value) return;
+      if (key === 'dialogue' && preserveDialogue) return;
       if (overwrite || !(shot[key] || '').trim()) {
         shot[key] = String(value).trim();
         if (source) shot.dialogueSource = 'ai';
@@ -3936,7 +4088,7 @@ h1.project-title button:hover{background:var(--panel-3)}
 
     if (lines.length && (overwrite || !(shot.dialogueLines || []).length)) {
       shot.dialogueLines = lines;
-      if (!shot.dialogue && lines.length) {
+      if (!preserveDialogue && lines.length) {
         shot.dialogue = lines.map((d) => `${d.speaker || '—'}：${d.text}`).join('\n');
         shot.dialogueSource = 'ai';
       }
