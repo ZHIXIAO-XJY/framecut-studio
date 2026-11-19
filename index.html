@@ -685,22 +685,22 @@ h1.project-title button:hover{background:var(--panel-3)}
           <input type="radio" name="mode" value="fast" />
           <span class="mode-check"><svg><use href="#i-check"/></svg></span>
           <div class="mode-name">快拆 <span class="en">FAST</span></div>
-          <div class="mode-rate">2 <span>fps / 0.5s</span></div>
+          <div class="mode-rate">0.5 <span>fps / 2s</span></div>
           <div class="mode-note">长片初筛 · 结构概览</div>
         </label>
         <label class="mode-option" data-mode="precision">
           <input type="radio" name="mode" value="precision" />
           <span class="mode-check"><svg><use href="#i-check"/></svg></span>
           <div class="mode-name">精拆 <span class="en">PRECISION</span></div>
-          <div class="mode-rate">4 <span>fps / 0.25s</span></div>
+          <div class="mode-rate">1 <span>fps / 1s</span></div>
           <div class="mode-note">短片深读 · 关键镜头</div>
         </label>
       </div>
       <div class="mode-summary">
         <span>预计生成</span>
-        <span><b id="expected-frames">12</b> 帧 · <b id="expected-interval">0.5</b>s / 帧</span>
+        <span><b id="expected-frames">12</b> 帧 · <b id="expected-interval">2</b>s / 帧</span>
       </div>
-      <p class="help" id="mode-help">快拆模式适合长视频首轮筛选，精拆模式更适合 3 分钟内的短片与带货视频。</p>
+      <p class="help" id="mode-help">快拆 2 秒/帧，适合长视频先看结构；精拆 1 秒/帧，适合短片、口播和带货。</p>
     </section>
 
     <section class="side-section">
@@ -831,8 +831,8 @@ h1.project-title button:hover{background:var(--panel-3)}
         </div>
         <div class="stat">
           <span class="stat-label">MODE / 模式</span>
-          <div class="stat-value" id="stat-mode">2 fps</div>
-          <div class="stat-sub" id="stat-mode-sub">0.5s / 帧 · 快拆</div>
+          <div class="stat-value" id="stat-mode">0.5 fps</div>
+          <div class="stat-sub" id="stat-mode-sub">2s / 帧 · 快拆</div>
         </div>
         <div class="stat">
           <span class="stat-label">QC / 质检</span>
@@ -1077,10 +1077,11 @@ h1.project-title button:hover{background:var(--panel-3)}
         <div class="qc-row"><span>质检策略</span><b>补全后自动质检</b></div>
         <div class="inline-row" style="margin-top:5px"><button class="link-btn" id="btn-batch-api" type="button">修改视觉 / 文本模型与 Key</button></div>
         <div class="field" style="margin-top:10px">
-          <label for="batch-size">本批请求数</label>
+          <label for="batch-size">请求范围</label>
           <select class="select" id="batch-size">
+            <option value="100000" selected>全部分镜（不限次数）</option>
             <option value="12">12 次请求</option>
-            <option value="24" selected>24 次请求</option>
+            <option value="24">24 次请求</option>
             <option value="48">48 次请求</option>
             <option value="96">96 次请求</option>
           </select>
@@ -1373,7 +1374,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     <div class="modal-body">
       <div class="method-grid">
         <div class="method-card"><div class="n">P0 / PROBE</div><h4>探针与素材准备</h4><p>确认时长、分辨率、音轨与格式。本页在载入视频时自动完成并写入附录。</p></div>
-        <div class="method-card"><div class="n">P1 / SAMPLE</div><h4>固定频率采样</h4><p>快拆 2 fps（0.5s），精拆 4 fps（0.25s）。用 Canvas 精确定位时间点，不靠截图猜。</p></div>
+        <div class="method-card"><div class="n">P1 / SAMPLE</div><h4>固定频率采样</h4><p>快拆 0.5 fps（2s/帧），精拆 1 fps（1s/帧）。用 Canvas 精确定位时间点，不靠截图猜。</p></div>
         <div class="method-card"><div class="n">P2 / TIMELINE</div><h4>建立时间轴</h4><p>每一帧就是一个带时间码的分镜单元，卡片顺序即播放顺序，不破坏原始时间关系。</p></div>
         <div class="method-card"><div class="n">P3 / EVIDENCE</div><h4>画面与字幕证据</h4><p>支持导入 SRT / 手动台词，按时间挂载；台词优先于模型猜测。</p></div>
         <div class="method-card"><div class="n">P4 / QC</div><h4>质检前置</h4><p>抽帧后立即做黑屏、模糊、过曝、字段完整与相邻帧相似度校验，问题在写作前暴露。</p></div>
@@ -1468,8 +1469,8 @@ h1.project-title button:hover{background:var(--panel-3)}
   const pad = (n, w = 2) => String(Math.floor(n)).padStart(w, '0');
 
   const MODES = {
-    fast: { key: 'fast', name: '快拆', en: 'FAST', fps: 2, interval: 0.5, desc: '2 fps · 0.5s / 帧' },
-    precision: { key: 'precision', name: '精拆', en: 'PRECISION', fps: 4, interval: 0.25, desc: '4 fps · 0.25s / 帧' }
+    fast: { key: 'fast', name: '快拆', en: 'FAST', fps: 0.5, interval: 2, desc: '0.5 fps · 2s / 帧' },
+    precision: { key: 'precision', name: '精拆', en: 'PRECISION', fps: 1, interval: 1, desc: '1 fps · 1s / 帧' }
   };
 
   const DEFAULT_SETTINGS = {
@@ -2356,16 +2357,16 @@ h1.project-title button:hover{background:var(--panel-3)}
     } else if (p?.demo) {
       summary.className = state.selectedMode === 'precision' ? 'help warn' : 'help';
       summary.textContent = state.selectedMode === 'precision'
-        ? '示例项目固定为快拆 2 fps / 12 帧；上传视频后才会按精拆 4 fps 重新抽帧。'
-        : '示例项目固定为快拆 2 fps / 12 帧，用于快速体验质检与导出；上传视频后可切精拆。';
+        ? '示例项目固定为快拆 12 帧；上传视频后才会按精拆 1 秒/帧重新抽帧。'
+        : '示例项目固定为快拆 12 帧，用于快速体验质检与导出；上传视频后可切精拆。';
     } else if (p && p.shots.length && p.mode !== state.selectedMode) {
       summary.className = 'help warn';
       summary.textContent = `当前分镜按「${projectMode().name}」生成；切换模式后需重新拆解才会生效。`;
     } else {
       summary.className = 'help';
       summary.textContent = state.selectedMode === 'fast'
-        ? '快拆模式适合长视频首轮筛选；0.5 秒一帧，先看结构，不追细节。'
-        : '精拆模式适合 3 分钟内的短片与带货视频；0.25 秒一帧，关键表情和动作不易漏。';
+        ? '快拆模式适合长视频首轮筛选；2 秒一帧，先看结构，不追细节。'
+        : '精拆模式适合短片与带货视频；1 秒一帧，兼顾台词和关键动作。';
     }
   }
 
@@ -3603,6 +3604,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     $('#btn-compose-stop').hidden = false;
     $('#btn-start').disabled = true;
     let done = 0, failed = 0;
+    const failedShots = [];
     setComposeProgress(2, '开始分镜合成', `共 ${shots.length} 个分镜，先提取台词`, 0);
     try {
       if (state.rawFrames?.length && !state.pendingSubs.length) {
@@ -3638,12 +3640,33 @@ h1.project-title button:hover{background:var(--panel-3)}
           dedupeShotDialogue(shot);
         } else {
           failed++;
+          failedShots.push(shot);
           console.warn('compose shot failed', shot.index, lastErr);
         }
         done++;
         replaceShotCard(shot);
         setComposeProgress(22 + (done / p.shots.length) * 62, '分镜补全', `${done} / ${p.shots.length} 分镜 · #${String(shot.index).padStart(3, '0')}`, failed);
         await sleep(140);
+      }
+
+      // 失败分镜再补一轮，确保尽量全部分镜补全。
+      if (failedShots.length && !state.ui.composeStop) {
+        setComposeProgress(84, '补全失败重试', `${failedShots.length} 个分镜重试中…`, failed);
+        for (const shot of failedShots) {
+          if (state.ui.composeStop) break;
+          try {
+            const parsed = await requestShotAnalysis(shot);
+            applyAIFields(shot, parsed, true);
+            shot.aiAnalyzed = true;
+            dedupeShotDialogue(shot);
+            failed = Math.max(0, failed - 1);
+            replaceShotCard(shot);
+            setComposeProgress(84, '补全失败重试', `#${String(shot.index).padStart(3, '0')} 已补全`, failed);
+          } catch (e) {
+            console.warn('compose retry failed', shot.index, e);
+          }
+          await sleep(180);
+        }
       }
 
       setComposeProgress(86, '质检与去重', '检查画面与字段，合并重复分镜…', failed);
@@ -4154,6 +4177,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     $('#batch-overwrite').checked = false;
     $('#batch-group').checked = false;
     $('#batch-auto-qc').checked = true;
+    $('#batch-size').value = '100000';
     $('#batch-progress').hidden = true;
     $('#batch-log').hidden = true;
     $('#batch-log').textContent = '';
