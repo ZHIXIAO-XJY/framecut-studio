@@ -726,6 +726,19 @@ h1.project-title button:hover{background:var(--panel-3)}
         </button>
         <button class="btn danger" id="btn-cancel" type="button" hidden>停止</button>
       </div>
+      <button class="btn primary wide" id="btn-compose" type="button" style="margin-top:10px">
+        <svg class="icon"><use href="#i-sparkles"/></svg><span id="btn-compose-text">分镜头合成</span>
+      </button>
+      <div class="inline-row" style="margin-top:7px;justify-content:space-between">
+        <span class="help" style="margin:0">自动分组 → 逐分镜补全 → 质检 → 去重合并</span>
+        <button class="link-btn danger" id="btn-compose-stop" type="button" hidden>停止</button>
+      </div>
+      <div class="progress-box" id="compose-progress" hidden style="margin-top:9px">
+        <div class="progress-top"><span id="compose-label">准备合成</span><b id="compose-pct">0%</b></div>
+        <div class="progress-track"><i class="progress-fill" id="compose-fill"></i></div>
+        <div class="progress-foot"><span id="compose-detail">0 / 0 分镜</span><span id="compose-failed">失败 0</span></div>
+      </div>
+
       <div class="inline-row" style="margin-top:8px;justify-content:space-between">
         <button class="link-btn" id="btn-demo" type="button">
           <svg class="icon" style="width:11px;height:11px"><use href="#i-refresh"/></svg>载入示例项目
@@ -735,6 +748,7 @@ h1.project-title button:hover{background:var(--panel-3)}
       <button class="link-btn" id="btn-regroup" type="button" style="margin-top:6px">
         <svg class="icon" style="width:11px;height:11px"><use href="#i-layers"/></svg>把当前采样帧按场景重新分镜
       </button>
+      <button class="link-btn" id="btn-ai-segment" type="button" style="margin-top:4px" hidden>
       <p class="help" id="extract-help">抽帧使用浏览器原生解码 + Canvas，不需要服务器；大文件的速度取决于设备性能。</p>
     </section>
 
@@ -743,13 +757,13 @@ h1.project-title button:hover{background:var(--panel-3)}
         <div class="kicker"><b>04</b> AI / 补全</div>
         <span class="side-meta" id="side-ai-state">待补全</span>
       </div>
-      <p class="help" style="margin-top:0">拆解完成后，在右侧配置参数，只对缺字段的镜头补人物、对话、视角与环境。补全后自动质检一遍。</p>
+      <p class="help" style="margin-top:0">「分镜头合成」会自动完成补全，不需要再手动点 AI。这里只查看状态或改高级参数；按分镜请求，不逐帧。</p>
       <div class="qc-panel">
         <div class="qc-row"><span>视觉模型</span><b id="side-ai-model">deepseek-flash</b></div>
         <div class="qc-row"><span>待补全</span><b id="side-ai-candidates">0</b></div>
       </div>
-      <button class="btn primary wide" id="btn-side-batch" type="button" style="margin-top:9px">
-        <svg class="icon"><use href="#i-sparkles"/></svg>AI 补全 / 参数
+      <button class="btn wide" id="btn-side-batch" type="button" style="margin-top:9px">
+        <svg class="icon"><use href="#i-settings"/></svg>AI 参数 / 手动补全
       </button>
       <div class="inline-row" style="margin-top:8px;justify-content:space-between">
         <button class="link-btn" id="btn-side-ai-settings" type="button">连接设置</button>
@@ -1576,6 +1590,8 @@ h1.project-title button:hover{background:var(--panel-3)}
       extracting: false,
       cancelRequested: false,
       qcBusy: false,
+      composing: false,
+      composeStop: false,
       aiBusy: new Set(),
       activeShotId: null,
       modal: null,
@@ -2383,10 +2399,12 @@ h1.project-title button:hover{background:var(--panel-3)}
     const pendingAI = total ? batchCandidates(false).length : 0;
     setText('#side-ai-candidates', total ? `${pendingAI} 个分镜` : '0');
     setText('#side-ai-model', state.settings.visionModel || '未配置');
-    setText('#side-ai-state', !total ? '未开始' : pendingAI ? '待补全' : '已完成');
+    setText('#side-ai-state', state.ui.composing ? '合成中' : (!total ? '未开始' : pendingAI ? '待补全' : '已完成'));
     setText('#side-ai-note', pendingAI ? '先质检，再补全' : '字段已补全');
     setText('#batch-vision-model', state.settings.visionModel || '未配置');
-    setText('#run-state', state.ui.extracting ? 'RUNNING' : state.ui.qcBusy ? 'CHECKING' : 'READY');
+    setText('#run-state', state.ui.extracting ? 'RUNNING' : state.ui.composing ? 'COMPOSING' : state.ui.qcBusy ? 'CHECKING' : 'READY');
+    const composeBtn = $('#btn-compose');
+    if (composeBtn) composeBtn.disabled = state.ui.composing || state.ui.extracting;
   }
 
   function renderFilters() {
@@ -3144,6 +3162,7 @@ h1.project-title button:hover{background:var(--panel-3)}
       setProgress(92, '正在分镜', `把 ${shots.length} 个采样帧按场景合并…`, '—', 'qc');
       const grouped = groupFramesToShots(shots);
       state.project.capturedFrames = shots.length;
+      state.rawFrames = shots;
       state.project.shots = grouped;
 
       if (state.ui.cancelRequested) {
@@ -3179,6 +3198,326 @@ h1.project-title button:hover{background:var(--panel-3)}
       $('#btn-start').disabled = false;
       renderAll();
       setTimeout(() => showProgress(false), 300);
+    }
+  }
+
+  // ── AI 标准分镜：按动作/信息、景别机位角度、主体焦点切分 ─────
+  const SEGMENT_SYSTEM = `你是专业分镜师。严格按照以下三条标准判断镜头切点：
+一、动作与信息：一个镜头只对应一个完整动作、一个核心信息。人物动作开始/结束/停顿、讲解内容或台词语义更换、话题转折、表达重点变化时，必须切。
+二、画面拍摄：景别（全景/中景/近景/特写）、机位（前后/左右/远近）、角度（平视/俯拍/仰拍/侧拍）任意一项改变，必须切。同机位、同角度、同景别的推、拉、摇、移，不算切换。
+三、主体与焦点：主要拍摄对象换人、换物，或视觉焦点从一处细节转移到另一处细节，必须切。
+只输出 JSON，不要解释：{"segments":[{"start":秒,"end":秒,"reason":"切分依据","shotSize":"景别","angle":"角度","subject":"主体","focus":"焦点"}]}。segments 必须按时间排序、覆盖整个给定时间范围、互不重叠。不要改写字幕内容。`;
+
+  function loadThumb(src) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+  }
+
+  async function buildSegmentSheet(frames, start, count = 12) {
+    const slice = frames.slice(start, start + count);
+    const cols = 3, rows = 4, tw = 180, th = 320, labelH = 24;
+    const canvas = document.createElement('canvas');
+    canvas.width = cols * tw;
+    canvas.height = rows * (th + labelH);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const imgs = await Promise.all(slice.map((f) => loadThumb(f.thumb)));
+    slice.forEach((f, i) => {
+      const x = (i % cols) * tw;
+      const y = Math.floor(i / cols) * (th + labelH);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(x, y, tw, th + labelH);
+      if (imgs[i]) ctx.drawImage(imgs[i], x, y + labelH, tw, th);
+      else { ctx.fillStyle = '#333'; ctx.fillRect(x, y + labelH, tw, th); }
+      ctx.fillStyle = 'rgba(0,0,0,.75)';
+      ctx.fillRect(x, y, tw, labelH);
+      ctx.fillStyle = '#ffd36b';
+      ctx.font = 'bold 15px monospace';
+      ctx.fillText(`${fmtTime(f.start, true)}  #${String(f.index).padStart(3, '0')}`, x + 8, y + 17);
+    });
+    return { dataUrl: canvas.toDataURL('image/jpeg', .82), slice };
+  }
+
+  async function requestSegmentSheet(sheet, index, total) {
+    const first = sheet.slice[0]?.start || 0;
+    const last = sheet.slice[sheet.slice.length - 1]?.end || 0;
+    const text = `这是第 ${index + 1}/${total} 张分镜候选网格，时间范围 ${fmtTime(first, true)}–${fmtTime(last, true)}。请按系统消息的三条标准切分，输出绝对秒数。`;
+    const res = await fetch(apiURL(), {
+      method: 'POST',
+      headers: apiHeaders(),
+      body: JSON.stringify({
+        model: state.settings.visionModel,
+        ...reasoningOffField(),
+        temperature: .1,
+        max_tokens: 2200,
+        messages: [
+          { role: 'user', content: [
+            { type: 'text', text: `${SEGMENT_SYSTEM}\n${text}` },
+            { type: 'image_url', image_url: { url: sheet.dataUrl, detail: 'high' } }
+          ] }
+        ]
+      })
+    });
+    if (!res.ok) throw await apiError(res);
+    const data = await res.json();
+    const message = data.choices?.[0]?.message || {};
+    let content = message.content || '';
+    if (Array.isArray(content)) content = content.map((c) => c.text || '').join('\\n');
+    if (!String(content).trim()) throw new Error('分镜模型没有返回内容');
+    const match = String(content).match(/\\{[\\s\\S]*\\}/);
+    if (!match) throw new Error('分镜模型没有返回 JSON');
+    const parsed = JSON.parse(match[0]);
+    return (parsed.segments || []).map((s) => ({
+      start: Number(s.start), end: Number(s.end),
+      reason: s.reason || '', shotSize: s.shotSize || '', angle: s.angle || '', subject: s.subject || '', focus: s.focus || ''
+    })).filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start);
+  }
+
+  async function aiSegmentProject() {
+    const p = state.project;
+    if (!p) return;
+    if (!state.rawFrames?.length) {
+      toast('当前项目没有保留原始采样帧。请重新拆解一次视频，再运行 AI 标准分镜。', 'warn', 5000);
+      return;
+    }
+    if (!state.settings.proxyMode && !state.settings.apiKey) {
+      toast('先配置 API Key，再运行 AI 标准分镜。', 'warn', 4000);
+      return;
+    }
+    const ok = await askConfirm('AI 按三大标准重新分镜', `将对 ${state.rawFrames.length} 个采样帧做动作/信息、景别机位角度、主体焦点判断，重新切分并清空当前 AI 字段与质检。继续吗？`, '开始标准分镜');
+    if (!ok) return;
+    const frames = state.rawFrames;
+    const sheets = [];
+    for (let i = 0; i < frames.length; i += 12) sheets.push(await buildSegmentSheet(frames, i, 12));
+    const all = [];
+    showProgress(true);
+    try {
+      for (let i = 0; i < sheets.length; i++) {
+        setProgress(4 + (i / sheets.length) * 84, 'AI 标准分镜', `第 ${i + 1} / ${sheets.length} 张网格 · 判断动作/机位/焦点`, '—', 'qc');
+        const segs = await requestSegmentSheet(sheets[i], i, sheets.length);
+        all.push(...segs);
+        await sleep(120);
+      }
+      if (!all.length) throw new Error('AI 没有返回有效分镜');
+      const bounds = [0];
+      for (const s of all) {
+        if (s.start > 0 && s.start < p.duration - .01) bounds.push(s.start);
+        if (s.end > 0 && s.end < p.duration - .01) bounds.push(s.end);
+      }
+      const cuts = [...new Set(bounds.map((t) => Math.round(t * 10) / 10))].sort((a, b) => a - b);
+      const groups = [];
+      for (let i = 0; i < cuts.length; i++) {
+        const a = cuts[i], b = i + 1 < cuts.length ? cuts[i + 1] : p.duration;
+        const fs = frames.filter((f) => f.start >= a - .001 && f.start < b - .001);
+        if (fs.length) groups.push(fs);
+      }
+      if (!groups.length) throw new Error('分镜时间轴为空');
+      const shots = groups.map((g, i) => makeShotFromFrames(g, i + 1));
+      p.capturedFrames = frames.length;
+      p.shots = shots;
+      p.segmentSource = 'ai-standard';
+      applyAutoQC(shots);
+      setProgress(100, '标准分镜完成', `${frames.length} 采样帧 → ${shots.length} 个分镜`, 'DONE', 'qc');
+      renderAll();
+      scheduleAutosave();
+      toast(`AI 标准分镜完成：${shots.length} 个分镜。切分依据已按动作/机位/焦点复核。`, 'success', 6000);
+      setTimeout(() => showProgress(false), 800);
+    } catch (e) {
+      console.error(e);
+      showProgress(false);
+      toast(`AI 标准分镜失败：${explainFetchError(e).slice(0, 130)}`, 'error', 7000);
+    }
+  }
+
+  // ── 一键分镜头合成：分组 → 逐分镜补全 → 质检 → 去重合并 ──
+  function setComposeProgress(pct, label, detail, failed = 0) {
+    const box = $('#compose-progress');
+    if (!box) return;
+    box.hidden = false;
+    setText('#compose-label', label);
+    setText('#compose-pct', `${Math.round(pct)}%`);
+    setText('#compose-detail', detail);
+    setText('#compose-failed', `失败 ${failed}`);
+    $('#compose-fill').style.width = `${Math.max(0, Math.min(100, pct))}%`;
+  }
+
+  function dedupeShotDialogue(shot) {
+    if (!Array.isArray(shot.dialogueLines)) shot.dialogueLines = [];
+    const seen = new Set();
+    shot.dialogueLines = shot.dialogueLines.filter((d) => {
+      const t = String(d?.text || '').trim();
+      if (!t || seen.has(t)) return false;
+      seen.add(t);
+      return true;
+    });
+    const parts = String(shot.dialogue || '').split(/\s*\/\s*|\n+/).map((s) => s.trim()).filter(Boolean);
+    shot.dialogue = [...new Set(parts)].join(' / ');
+  }
+
+  function contentBigrams(text) {
+    const s = String(text || '').replace(/\s+/g, '').replace(/[，。！？；：“”"'、,.!?;:]/g, '');
+    const set = new Set();
+    for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+    return set;
+  }
+
+  function contentSimilarity(a, b) {
+    const A = contentBigrams(a);
+    const B = contentBigrams(b);
+    if (!A.size || !B.size) return 0;
+    let hit = 0;
+    for (const x of A) if (B.has(x)) hit++;
+    return hit / Math.max(1, Math.min(A.size, B.size));
+  }
+
+  function mergeShotPair(a, b) {
+    const chars = new Map();
+    for (const c of [...(a.characters || []), ...(b.characters || [])]) {
+      if (!c?.name) continue;
+      const old = chars.get(c.name);
+      if (!old) chars.set(c.name, { ...c });
+      else {
+        for (const k of ['appearance', 'wardrobe', 'expression', 'action']) {
+          if (!old[k] && c[k]) old[k] = c[k];
+        }
+      }
+    }
+    const lines = [];
+    const seen = new Set();
+    for (const d of [...(a.dialogueLines || []), ...(b.dialogueLines || [])]) {
+      const t = String(d?.text || '').trim();
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      lines.push({ ...d, text: t });
+    }
+    const dialogueParts = [...new Set([
+      ...String(a.dialogue || '').split(/\s*\/\s*|\n+/),
+      ...String(b.dialogue || '').split(/\s*\/\s*|\n+/)
+    ].map((s) => s.trim()).filter(Boolean))];
+    return {
+      ...a,
+      end: b.end,
+      frameCount: (a.frameCount || 1) + (b.frameCount || 1),
+      keyframes: [...(a.keyframes || []), ...(b.keyframes || [])].slice(-6),
+      description: (a.description || '').length >= (b.description || '').length ? a.description : b.description,
+      dialogue: dialogueParts.join(' / '),
+      dialogueLines: lines,
+      characters: [...chars.values()],
+      expressionArc: [...(a.expressionArc || []), ...(b.expressionArc || [])].filter((e, i, arr) => arr.findIndex((x) => x.expression === e.expression && x.time === e.time) === i),
+      aiAnalyzed: true,
+      qc: { status: 'pending', score: null, issues: [], checkedAt: null, method: 'auto' },
+      manualPass: false
+    };
+  }
+
+  function mergeDuplicateShots(shots) {
+    let list = shots.slice();
+    for (let round = 0; round < 3; round++) {
+      const out = [];
+      for (const shot of list) {
+        const prev = out[out.length - 1];
+        if (!prev) { out.push(shot); continue; }
+        const sim = contentSimilarity(`${prev.description || ''} ${prev.dialogue || ''}`, `${shot.description || ''} ${shot.dialogue || ''}`);
+        const pLines = new Set(String(prev.dialogue || '').split(/\s*\/\s*/).filter(Boolean));
+        const sLines = String(shot.dialogue || '').split(/\s*\/\s*/).filter(Boolean);
+        const overlap = sLines.length ? sLines.filter((x) => pLines.has(x)).length / sLines.length : 0;
+        const sameShot = prev.camera === shot.camera && prev.shotSize === shot.shotSize && prev.angle === shot.angle;
+        if ((sim >= .84 && overlap >= .55) || (overlap >= .85 && sameShot)) out[out.length - 1] = mergeShotPair(prev, shot);
+        else out.push(shot);
+      }
+      if (out.length === list.length) break;
+      list = out;
+    }
+    list.forEach((s, i) => { s.index = i + 1; });
+    return list;
+  }
+
+  async function composeShots() {
+    if (state.ui.composing) return;
+    const p = state.project;
+    if (!p) { toast('先载入视频并完成拆解。', 'warn'); return; }
+    if (!state.settings.proxyMode && !state.settings.apiKey) {
+      toast('先配置 API Key，再开始分镜头合成。', 'warn', 4500);
+      openSettings();
+      return;
+    }
+    let shots = p.shots || [];
+    if (state.rawFrames?.length && (!shots.length || !shots[0]?.frameCount)) {
+      shots = groupFramesToShots(state.rawFrames);
+      p.capturedFrames = state.rawFrames.length;
+      p.shots = shots;
+    }
+    if (!shots.length) { toast('还没有可合成的分镜，请先执行拆解。', 'warn'); return; }
+
+    state.ui.composing = true;
+    state.ui.composeStop = false;
+    $('#btn-compose').disabled = true;
+    setText('#btn-compose-text', '合成中…');
+    $('#btn-compose-stop').hidden = false;
+    $('#btn-start').disabled = true;
+    let done = 0, failed = 0;
+    setComposeProgress(2, '开始分镜合成', `共 ${shots.length} 个分镜，逐镜补全`, 0);
+    try {
+      for (const shot of p.shots) {
+        if (state.ui.composeStop) break;
+        dedupeShotDialogue(shot);
+        if (shot.aiAnalyzed && !shotNeedsFields(shot)) {
+          done++;
+          setComposeProgress(4 + (done / p.shots.length) * 78, '分镜补全', `${done} / ${p.shots.length} 分镜`, failed);
+          continue;
+        }
+        let parsed = null;
+        let lastErr = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            parsed = await requestShotAnalysis(shot);
+            break;
+          } catch (e) {
+            lastErr = e;
+            if (attempt < 2) await sleep(900);
+          }
+        }
+        if (parsed) {
+          applyAIFields(shot, parsed, true);
+          shot.aiAnalyzed = true;
+          dedupeShotDialogue(shot);
+        } else {
+          failed++;
+          console.warn('compose shot failed', shot.index, lastErr);
+        }
+        done++;
+        replaceShotCard(shot);
+        setComposeProgress(4 + (done / p.shots.length) * 78, '分镜补全', `${done} / ${p.shots.length} 分镜 · #${String(shot.index).padStart(3, '0')}`, failed);
+        await sleep(140);
+      }
+
+      setComposeProgress(86, '质检与去重', '检查画面与字段，合并重复分镜…', failed);
+      await sleep(180);
+      const before = p.shots.length;
+      p.shots = mergeDuplicateShots(p.shots);
+      const merged = before - p.shots.length;
+      applyAutoQC(p.shots);
+      p.segmentSource = 'compose-auto';
+      renderAll();
+      scheduleAutosave();
+      setComposeProgress(100, state.ui.composeStop ? '已停止合成' : '分镜合成完成', `${p.shots.length} 个分镜 · 合并 ${merged} 个重复段`, failed);
+      toast(`分镜合成${state.ui.composeStop ? '已停止' : '完成'}：${p.shots.length} 个分镜，合并重复 ${merged} 个，失败 ${failed} 个。`, failed ? 'warn' : 'success', 6500);
+      setTimeout(() => { $('#compose-progress').hidden = true; }, 3200);
+    } catch (e) {
+      console.error(e);
+      toast(`分镜合成中断：${explainFetchError(e).slice(0, 120)}`, 'error', 6500);
+    } finally {
+      state.ui.composing = false;
+      $('#btn-compose').disabled = false;
+      setText('#btn-compose-text', '分镜头合成');
+      $('#btn-compose-stop').hidden = true;
+      $('#btn-start').disabled = false;
+      renderStats();
     }
   }
 
@@ -5747,7 +6086,10 @@ ${shots}`;
     $('#btn-batch-ai').addEventListener('click', openBatchAI);
     $('#btn-side-batch').addEventListener('click', openBatchAI);
     $('#btn-side-ai-settings').addEventListener('click', openSettings);
+    $('#btn-compose').addEventListener('click', composeShots);
+    $('#btn-compose-stop').addEventListener('click', () => { state.ui.composeStop = true; toast('已请求停止，当前分镜完成后停止。', 'warn'); });
     $('#btn-regroup').addEventListener('click', regroupProject);
+    $('#btn-ai-segment').addEventListener('click', aiSegmentProject);
     $('#btn-batch-api').addEventListener('click', openSettings);
     $('#btn-batch-start').addEventListener('click', runBatchAI);
     $('#btn-batch-stop').addEventListener('click', stopBatchAI);
