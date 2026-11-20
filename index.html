@@ -3431,6 +3431,34 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
    * 2fps 长片用 8x，4fps 用 4x；每个采样点抓“当前最近的一帧”，时间码仍按固定间隔写。
    * 对于 11 分钟视频，逐帧 seek 需约 10 分钟；播放采样通常 1–2 分钟。
    */
+
+  async function captureSequenceBySeeking(times, mode, duration, captureWidth, appendShot, onProgress) {
+    const video = state.video.el;
+    video.pause();
+    video.muted = true;
+    const shots = [];
+    let failed = 0;
+    const startedAt = performance.now();
+    for (let i = 0; i < times.length; i++) {
+      if (state.ui.cancelRequested) break;
+      const t = times[i];
+      try {
+        await seekVideo(video, t, 6500);
+      } catch (e) {
+        console.warn('seek failed', t, e);
+      }
+      let cap = null;
+      try { cap = captureVideoFrame(video, captureWidth); } catch (e) { failed++; }
+      const end = Math.min(duration, Number((t + mode.interval).toFixed(4)));
+      const shot = shotFromCapture(cap, t, end, shots.length + 1);
+      shots.push(shot);
+      appendShot(shot);
+      onProgress(i + 1, times.length, failed, (performance.now() - startedAt) / 1000);
+      if (i % 8 === 0) await sleep(0);
+    }
+    return { shots, failed, elapsed: (performance.now() - startedAt) / 1000, rate: 1 };
+  }
+
   async function captureSequenceByPlayback(times, mode, duration, captureWidth, appendShot, onProgress) {
     const video = state.video.el;
     video.pause();
@@ -3557,7 +3585,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     }
 
     const mode = activeMode();
-    const duration = state.video.duration || state.project.duration;
+    const duration = Math.max(Number(state.video.duration) || 0, Number(state.project.duration) || 0);
     let times = expectedTimes(duration, mode.interval);
     if (times.length > MAX_FRAMES) {
       const ok = await askConfirm('超过浏览器处理上限', `当前模式会生成 ${times.length} 帧，超过 ${MAX_FRAMES} 帧上限。将只处理前 ${MAX_FRAMES} 帧（约 ${fmtShort(MAX_FRAMES * mode.interval)}），仍继续吗？`, '继续处理');
@@ -3591,7 +3619,8 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     let failed = 0;
     let shots = [];
     try {
-      const result = await captureSequenceByPlayback(
+      const captureFn = (times.length > 100 || duration > 180) ? captureSequenceBySeeking : captureSequenceByPlayback;
+      const result = await captureFn(
         times,
         mode,
         duration,
