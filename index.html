@@ -2403,7 +2403,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     setText('#stat-shots', total);
     const shotsEl = $('#stat-shots');
     if (shotsEl) shotsEl.innerHTML = `${total} <small>个</small>`;
-    setText('#stat-shots-sub', p?.demo ? '示例分镜' : (p ? `${p.capturedFrames || total} 采样帧合并` : '等待载入'));
+    setText('#stat-shots-sub', p?.demo ? '示例分镜' : (p ? (p.sceneGrouped ? `${p.hardShotCount || total} 硬切镜头 → ${total} 场景段` : `${p.capturedFrames || total} 采样帧合并`) : '等待载入'));
     setText('#stat-duration', fmtTime(p?.duration || 0, true));
     setText('#stat-duration-sub', p?.width ? `${p.width} × ${p.height}` : '分辨率未知');
     setText('#stat-mode', `${projectMode().fps} fps`);
@@ -2566,6 +2566,7 @@ h1.project-title button:hover{background:var(--panel-3)}
             <span class="chip">${esc(shot.angle || '视角待补')}</span>
             ${(shot.characters || []).length ? `<span class="chip accent">${esc((shot.characters || []).map((c) => c.name).filter(Boolean).slice(0, 2).join(' / '))}</span>` : ''}
             <span class="chip">${(shot.end - shot.start).toFixed(2)}s</span>
+            ${shot.scene ? `<span class="chip accent">场景段 · ${shot.sceneShotCount || 1} 镜</span>` : ''}
             ${fieldPending ? '<span class="chip warn">字段待补</span>' : ''}
             ${shot.dialogueSource === 'subtitle' ? '<span class="chip accent">字幕</span>' : ''}
             ${shot.aiAnalyzed ? '<span class="chip accent">AI</span>' : ''}
@@ -4124,6 +4125,88 @@ ${lines || '（无台词）'}`;
     return Object.keys(map).length;
   }
 
+  function sceneEmotionCategory(text) {
+    const s = String(text || '');
+    if (/怒|愤|急|紧张|冲突|质问|争吵|压迫/.test(s)) return 'high';
+    if (/悲|哭|委屈|难过|沉重|低落/.test(s)) return 'sad';
+    if (/笑|轻松|平静|温和|日常|亲切/.test(s)) return 'calm';
+    return 'neutral';
+  }
+
+  function sameScene(a, b) {
+    const envA = a.environment || a.description || '';
+    const envB = b.environment || b.description || '';
+    const envSim = contentSimilarity(envA, envB);
+    if (envA && envB && envSim < .42) return false;
+    const ca = new Set((a.characters || []).map((c) => c.name).filter(Boolean));
+    const cb = new Set((b.characters || []).map((c) => c.name).filter(Boolean));
+    if (ca.size && cb.size) {
+      let overlap = 0;
+      for (const n of ca) if (cb.has(n)) overlap++;
+      if (!overlap) return false;
+    }
+    const ea = sceneEmotionCategory(a.emotion || a.description || '');
+    const eb = sceneEmotionCategory(b.emotion || b.description || '');
+    if (ea !== 'neutral' && eb !== 'neutral' && ea !== eb) return false;
+    return true;
+  }
+
+  function mergeShotsToScene(group, index) {
+    const first = group[0];
+    const last = group[group.length - 1];
+    const chars = new Map();
+    const lines = [];
+    const seen = new Set();
+    for (const s of group) {
+      for (const c of s.characters || []) if (c.name && !chars.has(c.name)) chars.set(c.name, c);
+      for (const d of s.dialogueLines || []) {
+        const key = dialogueKey(d.text);
+        if (key && !seen.has(key)) { seen.add(key); lines.push(d); }
+      }
+    }
+    const dialogue = mergeDialogueTexts(group.flatMap((s) => String(s.dialogue || '').split(/\s*\/\s*/).filter(Boolean))).join(' / ');
+    return {
+      ...first,
+      id: uid(),
+      index,
+      start: first.start,
+      end: last.end,
+      frameCount: group.reduce((n, s) => n + (s.frameCount || 1), 0),
+      keyframes: group.flatMap((s) => s.keyframes || []).slice(-8),
+      scene: true,
+      sceneShotCount: group.length,
+      subShots: group.map((s) => ({ index: s.index, start: s.start, end: s.end, description: s.description || '' })),
+      description: group.map((s) => s.description).sort((x, y) => (y || '').length - (x || '').length)[0] || '',
+      environment: group.map((s) => s.environment).sort((x, y) => (y || '').length - (x || '').length)[0] || '',
+      lighting: first.lighting || '',
+      emotion: first.emotion || '',
+      characters: [...chars.values()],
+      dialogue,
+      dialogueLines: lines,
+      expressionArc: group.flatMap((s) => s.expressionArc || []),
+      qc: { status: 'pending', score: null, issues: [], checkedAt: null, method: 'auto' },
+      manualPass: false
+    };
+  }
+
+  function groupShotsIntoScenes(shots) {
+    const out = [];
+    let group = [];
+    const flush = () => {
+      if (group.length) out.push(mergeShotsToScene(group, out.length + 1));
+      group = [];
+    };
+    for (const shot of shots) {
+      if (!group.length) { group.push(shot); continue; }
+      const prev = group[group.length - 1];
+      const tooLong = shot.end - group[0].start > 120;
+      if (tooLong || !sameScene(prev, shot)) { flush(); group.push(shot); }
+      else group.push(shot);
+    }
+    flush();
+    return out;
+  }
+
   async function composeShots() {
     if (state.ui.composing) return;
     const p = state.project;
@@ -4286,14 +4369,20 @@ ${lines || '（无台词）'}`;
       } catch (e) {
         console.warn('cast profile resolve failed', e);
       }
+      setComposeProgress(98, '场景段聚合', '按场景/空间、对手、情绪基调合并连续镜头…', failed);
+      const hardShotCount = p.shots.length;
+      p.shots = groupShotsIntoScenes(p.shots);
+      p.sceneGrouped = true;
+      p.sceneCount = p.shots.length;
+      p.hardShotCount = hardShotCount;
       applyAutoQC(p.shots);
       p.segmentSource = 'compose-auto';
       state.ui.visibleCount = p.shots.length;
       renderAll();
       scheduleAutosave();
-      setComposeProgress(100, state.ui.composeStop ? '已停止合成' : '分镜合成完成', `${p.shots.length} 个分镜 · 合并 ${merged} 个重复段`, failed);
+      setComposeProgress(100, state.ui.composeStop ? '已停止合成' : '分镜合成完成', `${p.shots.length} 个场景段 · ${hardShotCount} 个硬切镜头`, failed);
       const audit = p.dialogueAudit || { total: 0, attached: 0 };
-      toast(`分镜合成${state.ui.composeStop ? '已停止' : '完成'}：${p.shots.length} 个分镜，合并重复 ${merged} 个；台词 ${audit.attached}/${audit.total} 条入镜，失败 ${failed} 个。`, failed || audit.missing ? 'warn' : 'success', 7000);
+      toast(`分镜合成${state.ui.composeStop ? '已停止' : '完成'}：${p.shots.length} 个场景段（${hardShotCount} 个硬切镜头）；台词 ${audit.attached}/${audit.total} 条入镜，失败 ${failed} 个。`, failed || audit.missing ? 'warn' : 'success', 7000);
       setTimeout(() => { $('#compose-progress').hidden = true; }, 3200);
     } catch (e) {
       console.error(e);
@@ -4950,6 +5039,11 @@ ${lines || '（无台词）'}`;
         try { await resolveDialogueSpeakers(state.project.shots); } catch (e) { console.warn('speaker resolve failed', e); }
         try { await resolveDialogueProofread(state.project.shots); } catch (e) { console.warn('dialogue proofread failed', e); }
         try { await resolveCastProfiles(state.project.shots); } catch (e) { console.warn('cast profile resolve failed', e); }
+        const hardShotCount = state.project.shots.length;
+        state.project.shots = groupShotsIntoScenes(state.project.shots);
+        state.project.sceneGrouped = true;
+        state.project.sceneCount = state.project.shots.length;
+        state.project.hardShotCount = hardShotCount;
         if ($('#batch-auto-qc')?.checked) applyAutoQC(state.project.shots);
       }
       renderAll();
@@ -5506,6 +5600,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       push(`### ⏱️ [${fmtTime(shot.start)} - ${fmtTime(shot.end)}] #${String(shot.index).padStart(3, '0')} · ${title}`);
       push('');
       push(`> **场景描述**：${shot.description || '待补全。'}`);
+      if (shot.scene) push(`> **场景段**：由 ${shot.sceneShotCount || 1} 个硬切镜头组成（${(shot.subShots || []).map((s) => `#${String(s.index).padStart(3, '0')} ${fmtTime(s.start)}–${fmtTime(s.end)}`).join('；')}）。`);
       push(`> **构图**：${shot.shotSize || '景别待补'} / ${shot.angle || '视角待补'} / ${shot.camera || '运镜待补'}。**光线**：${shot.lighting || '待补'}。**环境**：${shot.environment || '待补'}。`);
       push('');
       if (shot.thumb && imageMode !== 'none') {
