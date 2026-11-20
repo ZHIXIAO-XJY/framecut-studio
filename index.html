@@ -1028,6 +1028,11 @@ h1.project-title button:hover{background:var(--panel-3)}
           <div><span>音频台词优先（DeepSeek ASR）</span><small>用视频音轨转写台词，官方 /v1/tools/asr；不额外配语音 Key</small></div>
           <label class="switch"><input type="checkbox" id="opt-asr" checked /><i></i></label>
         </div>
+        <div class="field" style="margin-top:10px">
+          <label for="deepgram-key">Deepgram API Key（说话人分离，可选）</label>
+          <input class="input" id="deepgram-key" type="password" spellcheck="false" autocomplete="off" placeholder="填入后优先用 Deepgram diarization" />
+          <p class="help">填了它：Deepgram 一次返回转写+时间戳+说话人编号，手机/画外音也能按同一 speaker 聚类；没填则用 DeepSeek ASR，再做上下文复核。</p>
+        </div>
         <div class="toggle-row">
           <div><span>代理模式</span><small>Base URL 指向自己的代理，由服务端注入 Key；本页不发送 Authorization</small></div>
           <label class="switch"><input type="checkbox" id="opt-proxy" /><i></i></label>
@@ -1483,6 +1488,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     textModel: 'deepseek-v4-pro',
     reasoningOff: true,
     asr: true,
+    deepgramKey: '',
     stream: true,
     context: true,
     proxyMode: false,
@@ -3688,6 +3694,66 @@ h1.project-title button:hover{background:var(--panel-3)}
     return assigned;
   }
 
+  async function transcribeWithDeepgram(file) {
+    if (!file) throw new Error('原始视频不在内存中');
+    const key = state.settings.deepgramKey;
+    if (!key) throw new Error('未配置 Deepgram Key');
+    const url = 'https://api.deepgram.com/v1/listen?model=nova-3&diarize=true&utterances=true&smart_format=true&punctuate=true&language=zh';
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 600000);
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Token ${key}`, 'Content-Type': file.type || 'video/mp4' },
+        body: file,
+        signal: ctrl.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) throw await apiError(res);
+    const data = await res.json();
+    const raw = data?.results?.utterances || [];
+    if (raw.length) {
+      return raw.map((u) => ({
+        start: Number(u.start) || 0,
+        end: Number(u.end) || 0,
+        speaker: `说话人${Number(u.speaker) || 0}`,
+        text: String(u.transcript || '').trim()
+      })).filter((u) => u.text);
+    }
+    const alt = data?.results?.channels?.[0]?.alternatives?.[0];
+    const words = alt?.words || [];
+    const out = [];
+    for (const w of words) {
+      const sp = `说话人${Number(w.speaker) || 0}`;
+      const last = out[out.length - 1];
+      if (last && last.speaker === sp) {
+        last.end = w.end;
+        last.text += String(w.punctuated_word || w.word || '');
+      } else {
+        out.push({ start: w.start, end: w.end, speaker: sp, text: String(w.punctuated_word || w.word || '') });
+      }
+    }
+    if (out.length) return out;
+    if (alt?.transcript) return [{ start: 0, end: state.project?.duration || 0, speaker: '说话人0', text: alt.transcript }];
+    return [];
+  }
+
+  function attachDiarizedUtterances(shots, utterances) {
+    const sorted = utterances.slice().sort((a, b) => a.start - b.start);
+    for (const shot of shots) {
+      const hit = sorted.filter((u) => u.start < shot.end - .01 && u.end > shot.start + .01);
+      if (!hit.length) continue;
+      shot.dialogueLines = hit.map((u) => ({ speaker: u.speaker, text: u.text, tone: '' }));
+      shot.dialogue = hit.map((u) => u.text).join(' / ');
+      shot.dialogueSource = 'diarize';
+      shot.speakerHints = {};
+      for (const u of hit) shot.speakerHints[dialogueKey(u.text)] = u.speaker;
+    }
+  }
+
   async function transcribeShotsAudio(shots, onProgress) {
     const audio = await decodeVideoAudio(state.video.file);
     const chunkSec = 110;
@@ -4029,7 +4095,19 @@ ${lines || '（无台词）'}`;
     try {
       if (!state.pendingSubs.length) {
         let asrOk = 0;
-        if (state.settings.asr !== false && state.video.file) {
+        let diarized = 0;
+        if (state.settings.deepgramKey && state.video.file) {
+          setComposeProgress(3, '说话人分离', 'Deepgram 转写 + diarization，识别每句话的说话人…', 0);
+          try {
+            const utts = await transcribeWithDeepgram(state.video.file);
+            attachDiarizedUtterances(p.shots, utts);
+            diarized = utts.length;
+            p.diarization = 'deepgram';
+          } catch (e) {
+            console.warn('Deepgram diarization failed, fallback ASR', e);
+          }
+        }
+        if (!diarized && state.settings.asr !== false && state.video.file) {
           setComposeProgress(3, '音频转写台词', '读取视频音轨，按分镜逐段送 DeepSeek ASR…', 0);
           try {
             const asr = await transcribeShotsAudio(p.shots, (done, total, ok) => {
@@ -4042,7 +4120,7 @@ ${lines || '（无台词）'}`;
             console.warn('ASR unavailable, fallback OCR', e);
           }
         }
-        if (!asrOk && state.rawFrames?.length) {
+        if (!diarized && !asrOk && state.rawFrames?.length) {
           setComposeProgress(5, '字幕 OCR 兜底', '音频转写不可用，逐帧识别底部字幕…', 0);
           await extractDialogueFromFrames(state.rawFrames, (doneFrames, totalFrames, calls) => {
             setComposeProgress(5 + (doneFrames / totalFrames) * 16, '字幕 OCR 兜底', `${doneFrames} / ${totalFrames} 帧 · OCR ${calls} 次`, 0);
@@ -5999,6 +6077,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     $('#opt-context').checked = !!state.settings.context;
     $('#opt-reasoning-off').checked = state.settings.reasoningOff !== false;
     $('#opt-asr').checked = state.settings.asr !== false;
+    $('#deepgram-key').value = state.settings.deepgramKey || '';
     $('#opt-proxy').checked = !!state.settings.proxyMode;
     $('#test-api-result').textContent = '';
     $('#test-api-result').className = 'help';
@@ -6018,6 +6097,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     state.settings.context = $('#opt-context').checked;
     state.settings.reasoningOff = $('#opt-reasoning-off').checked;
     state.settings.asr = $('#opt-asr').checked;
+    state.settings.deepgramKey = $('#deepgram-key').value.trim();
     state.settings.proxyMode = $('#opt-proxy').checked;
     persistSettings();
     renderApiState();
@@ -6646,7 +6726,7 @@ ${shots}`;
     // API / 设置
     $('#api-state').addEventListener('click', openSettings);
     $('#btn-assistant-settings').addEventListener('click', openSettings);
-    ['#api-base', '#api-vision-model', '#api-text-model', '#api-key'].forEach((sel) => {
+    ['#api-base', '#api-vision-model', '#api-text-model', '#api-key', '#deepgram-key'].forEach((sel) => {
       $(sel).addEventListener('input', syncSettingsFromForm);
     });
     ['#opt-stream', '#opt-context', '#opt-reasoning-off', '#opt-asr', '#opt-proxy'].forEach((sel) => $(sel).addEventListener('change', syncSettingsFromForm));
