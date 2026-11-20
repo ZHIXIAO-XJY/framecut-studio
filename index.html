@@ -1039,7 +1039,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
       </div>
       <p class="help" style="margin-top:0">「分镜头合成」会自动完成补全，不需要再手动点 AI。这里只查看状态或改高级参数；按分镜请求，不逐帧。</p>
       <div class="qc-panel">
-        <div class="qc-row"><span>视觉模型</span><b id="side-ai-model">deepseek-flash</b></div>
+        <div class="qc-row"><span>视觉模型</span><b id="side-ai-model">未配置</b></div>
         <div class="qc-row"><span>待补全</span><b id="side-ai-candidates">0</b></div>
       </div>
       <div class="note-box" style="margin-top:9px"><b>已改为自动补全：</b>点「分镜头合成」后会自动完成台词转写、角色归一、画面补全、质检和去重合并，不需要手动点 AI。</div>
@@ -1249,37 +1249,21 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     <div class="modal-body">
       <div class="settings-block">
         <div class="field">
-          <label for="api-provider">接口预设（任意 OpenAI 兼容均可）</label>
-          <select class="select" id="api-provider">
-            <option value="deepseek">DeepSeek 官方</option>
-            <option value="openai">OpenAI 兼容</option>
-            <option value="openrouter">OpenRouter</option>
-            <option value="siliconflow">硅基流动</option>
-            <option value="custom">自定义接口</option>
-          </select>
-          <p class="help">只要提供 Base URL + Key + 模型名，任何兼容 <code>/chat/completions</code> 的接口都能接入。</p>
-        </div>
-        <div class="field">
           <label for="api-base">BASE URL</label>
-          <input class="input" id="api-base" type="url" spellcheck="false" placeholder="https://api.deepseek.com/v1" />
+          <input class="input" id="api-base" type="url" spellcheck="false" placeholder="https://你的接口地址/v1" />
         </div>
         <div>
           <div class="field">
             <label for="api-vision-model">视觉模型（看图 / 批量补全）</label>
-            <input class="input" id="api-vision-model" list="model-presets" spellcheck="false" placeholder="deepseek-flash" />
-            <p class="help">批量补全、单镜重解读走这个模型。DeepSeek 官方用 <code>deepseek-flash</code>（支持图片）。</p>
+            <input class="input" id="api-vision-model" spellcheck="false" placeholder="支持图片的模型名" />
+            <p class="help">手动填写你的接口所支持的视觉模型名。</p>
           </div>
           <div class="field">
             <label for="api-text-model">文本模型（对话 / 摘要 / 文字整理）</label>
-            <input class="input" id="api-text-model" list="model-presets" spellcheck="false" placeholder="deepseek-v4-pro" />
-            <p class="help">AI 对话、文字总结走这个模型。可用 <code>deepseek-v4-pro</code> 或与你代理兼容的文本模型。</p>
+            <input class="input" id="api-text-model" spellcheck="false" placeholder="文本模型名" />
+            <p class="help">手动填写你的接口所支持的文本模型名。</p>
           </div>
         </div>
-        <datalist id="model-presets">
-          <option value="deepseek-flash"></option>
-          <option value="deepseek-v4-pro"></option>
-          <option value="deepseek-v4-flash-vision-exp"></option>
-        </datalist>
         <p class="help">Base URL 和 Key 共用。若代理只有一个模型，两个都填同一个；否则可“看图用视觉模型、对话用文本模型”。</p>
         <div class="field">
           <label for="api-key">API KEY</label>
@@ -1483,7 +1467,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
       <div class="settings-block">
         <div class="qc-row"><span>待补全分镜</span><b id="batch-candidates">0</b></div>
         <div class="qc-row"><span>项目总分镜</span><b id="batch-total">0</b></div>
-        <div class="qc-row"><span>视觉模型</span><b id="batch-vision-model">deepseek-flash</b></div>
+        <div class="qc-row"><span>视觉模型</span><b id="batch-vision-model">未配置</b></div>
         <div class="qc-row"><span>质检策略</span><b>补全后自动质检</b></div>
         <div class="inline-row" style="margin-top:5px"><button class="link-btn" id="btn-batch-api" type="button">修改视觉 / 文本模型与 Key</button></div>
         <div class="field" style="margin-top:10px">
@@ -1885,9 +1869,9 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
 
   const DEFAULT_SETTINGS = {
     apiKey: '',
-    baseUrl: 'https://api.deepseek.com/v1',
-    visionModel: 'deepseek-flash',
-    textModel: 'deepseek-v4-pro',
+    baseUrl: '',
+    visionModel: '',
+    textModel: '',
     reasoningOff: true,
     asr: true,
     deepgramKey: '',
@@ -1947,19 +1931,19 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     let stored = {};
     try { stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {}; } catch (e) { stored = {}; }
     const legacy = stored.model;
-    const official = /api\.deepseek\.com/i.test(stored.baseUrl || DEFAULT_SETTINGS.baseUrl);
-    // 老版本只有一个 model 字段：迁移成“视觉/文本”两套配置。
-    if (legacy && !stored.visionModel) {
-      stored.visionModel = legacy === 'deepseek-v4.1-flash-high'
-        ? (official ? 'deepseek-flash' : legacy)
-        : legacy;
-    }
-    if (legacy && !stored.textModel) {
-      stored.textModel = legacy === 'deepseek-v4.1-flash-high'
-        ? (official ? 'deepseek-v4-pro' : legacy)
-        : legacy;
-    }
+    // 老版本只有一个 model 字段：迁移成两套模型字段，不绑定任何厂商。
+    if (legacy && !stored.visionModel) stored.visionModel = legacy;
+    if (legacy && !stored.textModel) stored.textModel = legacy;
     delete stored.model;
+    // 旧版曾预填过 DeepSeek 默认值；未配置 Key 的旧设置清空，改为手动接入。
+    if (!stored.apiKey && !stored.proxyMode
+      && stored.baseUrl === 'https://api.deepseek.com/v1'
+      && stored.visionModel === 'deepseek-flash'
+      && stored.textModel === 'deepseek-v4-pro') {
+      delete stored.baseUrl;
+      delete stored.visionModel;
+      delete stored.textModel;
+    }
     const settings = { ...DEFAULT_SETTINGS, ...stored };
     if (settings.sessionKeys) {
       settings.apiKey = '';
@@ -5240,13 +5224,15 @@ ${lines || '（无台词）'}`;
   }
 
   function apiURL() {
-    let base = httpBaseURL(state.settings.baseUrl || 'https://api.deepseek.com/v1').href.replace(/\/+$/, '');
+    if (!state.settings.baseUrl) throw new Error('请先在设置中手动配置 API Base URL');
+    let base = httpBaseURL(state.settings.baseUrl).href.replace(/\/+$/, '');
     if (/\/chat\/completions$/i.test(base)) return base;
     return base + '/chat/completions';
   }
 
   function asrURL() {
-    let base = httpBaseURL(state.settings.baseUrl || 'https://api.deepseek.com/v1').href.replace(/\/+$/, '');
+    if (!state.settings.baseUrl) throw new Error('请先在设置中手动配置 API Base URL');
+    let base = httpBaseURL(state.settings.baseUrl).href.replace(/\/+$/, '');
     if (/\/chat\/completions$/i.test(base)) base = base.replace(/\/chat\/completions$/i, '');
     return base + '/tools/asr';
   }
@@ -5295,7 +5281,7 @@ ${lines || '（无台词）'}`;
     if (/API 429/.test(msg)) return '请求被限流。降低批量并发/批次大小，稍后再试。';
     if (/API 413/.test(msg)) return '请求体过大。减少批次帧数，或降低抽帧图片尺寸。';
     if (/API 400/.test(msg) && /image|vision|multimodal|content|图片/i.test(msg)) {
-      return '当前模型不接受图片输入（image_url）。请换成支持视觉的模型；DeepSeek 官方端点用 deepseek-flash，不是 deepseek-v4-pro。';
+      return '当前模型不接受图片输入（image_url）。请换成你接口所支持、可接收图片的视觉模型。';
     }
     if (/没有返回可解析的 JSON/.test(msg)) return '模型有响应，但没有返回可解析 JSON。请换支持视觉且遵循 JSON 输出的模型，或降低 temperature 后重试。';
     return msg || '请求失败';
@@ -7229,22 +7215,6 @@ ${review}${prompts}`;
     }
   }
 
-  function applyProviderPreset() {
-    const p = $('#api-provider')?.value || 'custom';
-    const presets = {
-      deepseek: ['https://api.deepseek.com/v1', 'deepseek-flash', 'deepseek-v4-pro'],
-      openai: ['https://api.openai.com/v1', 'gpt-4o', 'gpt-4o-mini'],
-      openrouter: ['https://openrouter.ai/api/v1', 'openai/gpt-4o', 'openai/gpt-4o-mini'],
-      siliconflow: ['https://api.siliconflow.cn/v1', 'Qwen/Qwen2.5-VL-72B-Instruct', 'Qwen/Qwen2.5-72B-Instruct']
-    };
-    const v = presets[p];
-    if (!v) return;
-    $('#api-base').value = v[0];
-    $('#api-vision-model').value = v[1];
-    $('#api-text-model').value = v[2];
-    syncSettingsFromForm();
-  }
-
   function openSettings() {
     $('#api-base').value = state.settings.baseUrl || '';
     $('#api-vision-model').value = state.settings.visionModel || '';
@@ -7259,9 +7229,6 @@ ${review}${prompts}`;
     $('#ali-key').value = state.settings.aliKey || '';
     $('#ali-file-url').value = state.settings.aliFileUrl || '';
     $('#opt-proxy').checked = !!state.settings.proxyMode;
-    const base = state.settings.baseUrl || '';
-    const provider = /deepseek\.com/i.test(base) ? 'deepseek' : /openai\.com/i.test(base) ? 'openai' : /openrouter/i.test(base) ? 'openrouter' : /siliconflow/i.test(base) ? 'siliconflow' : 'custom';
-    $('#api-provider').value = provider;
     renderExportDir();
     $('#test-api-result').textContent = '';
     $('#test-api-result').className = 'help';
@@ -7938,7 +7905,6 @@ ${shots}`;
       const del = e.target.closest('[data-history-delete]');
       if (del) deleteExportHistory(del.dataset.historyDelete);
     });
-    $('#api-provider').addEventListener('change', applyProviderPreset);
     $('#btn-choose-export-dir').addEventListener('click', chooseExportDir);
     $('#btn-clear-export-dir').addEventListener('click', clearExportDir);
     loadExportDirHandle();
