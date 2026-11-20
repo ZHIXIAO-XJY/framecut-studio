@@ -5696,6 +5696,7 @@ ${lines || '（无台词）'}`;
         try { await resolveCastNames(state.project.shots); } catch (e) { console.warn('cast name resolve failed', e); }
         try { await resolveDialogueSpeakers(state.project.shots); } catch (e) { console.warn('speaker resolve failed', e); }
         try { await resolveDialogueProofread(state.project.shots); } catch (e) { console.warn('dialogue proofread failed', e); }
+        validateDialogueSpeakers(state.project.shots);
         try { await resolveCastProfiles(state.project.shots); } catch (e) { console.warn('cast profile resolve failed', e); }
         const hardShotCount = state.project.shots.length;
         state.project.shots = groupShotsIntoScenes(state.project.shots);
@@ -6143,7 +6144,7 @@ ${meta.summary}
 
 ---
 
-## 人物档案
+## 人物档案；画面里若有姓名条/角色标签（如「闺蜜 刘丹」），优先把标签上的真实姓名作为角色名，不要只写“香槟色礼服女士”等泛称
 
 > 人物按画面中可见称谓聚合；同一人物跨帧的外貌/服装描述已合并。若为空，先运行 AI 补全或手动填写人物特征。
 
@@ -6197,6 +6198,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
 
   function buildPrecisionMarkdown(options = {}) {
     const p = state.project;
+    if (p?.shots?.length) validateDialogueSpeakers(p.shots);
     const meta = exportMeta();
     const counts = shotCounts();
     const imageMode = options.imageMode || 'inline';
