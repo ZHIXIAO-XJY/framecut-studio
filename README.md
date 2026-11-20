@@ -8,7 +8,7 @@
 ## 特性
 
 - 视频抽帧、快拆/精拆、分镜质检、逐帧复核
-- 一键「分镜头合成」：Deepgram diarization（可选）或 DeepSeek ASR → 台词分配 → 分镜 AI → 质检 → 去重合并
+- 一键「分镜头合成」：阿里云 Qwen-Audio Filetrans（可选，说话人分离）→ Deepgram → DeepSeek ASR → 分镜 AI → 质检 → 去重合并
 - 填 Deepgram Key 可得说话人编号，手机/画外音按同一声音聚类
 - ASR 不可用时才回退字幕 OCR
 - 台词优先：ASR 完整转写；跨分镜重复保留一次；语境校对同音错字/漏字；说话人上下文复核；AI 不覆盖台词
