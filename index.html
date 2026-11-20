@@ -4044,7 +4044,7 @@ ${list}`;
   async function resolveDialogueProofread(shots) {
     const rows = dialogueTimeline(shots).slice(0, 260);
     if (!rows.length) return 0;
-    const lineText = rows.map((r, i) => `${i}. [#${r.shot.index} ${fmtTime(r.shot.start)}] 说话人:${r.speaker || '未知'}｜画面:${(r.shot.description || '').slice(0, 80)}｜台词:${r.text}`).join('\n');
+    const lineText = rows.map((r, i) => `${i}. [#${r.shot.index} ${fmtTime(r.shot.start)}] 说话人:${r.speaker || '未知'}｜画面:${(r.shot.description || '').slice(0, 80)}｜台词:${r.text}｜字幕候选:${(r.shot.subtitleCandidates || []).join(' / ') || '—'}`).join('\n');
     const chars = [...new Set(shots.flatMap((s) => (s.characters || []).map((c) => c.name)).filter(Boolean))];
     const prompt = `你是短剧字幕校对。请根据画面上下文、角色关系和前后台词，校对 ASR 台词里的同音错字、漏字、明显错词；只改明显错误，不润色、不改写原意、不增删台词。同音字必须结合语义纠正，例如争执语境里的“你借什么枪”应改为“你接什么腔”；不能保留明显同音错字。
 同时复核说话人：优先使用台词里的称呼、人物关系和上下文。手机/电话/电视/广播里的声音，先判断声源，能对应人物就写“手机（角色名）/电视（角色名）”，不能对应写“手机画外音/电视画外音”；结合后续剧情同一声音出现的人物比对。不能判断才写“画外音”，不要写“未知”。
@@ -4826,6 +4826,7 @@ ${lines || '（无台词）'}`;
 
     if (lines.length && (overwrite || !(shot.dialogueLines || []).length)) {
       shot.dialogueLines = lines;
+      shot.subtitleCandidates = lines.map((d) => d.text).filter(Boolean);
       if (!preserveDialogue && lines.length) {
         shot.dialogue = lines.map((d) => `${d.speaker || '—'}：${d.text}`).join('\n');
         shot.dialogueSource = 'ai';
