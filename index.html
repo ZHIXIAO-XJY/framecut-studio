@@ -1033,6 +1033,13 @@ h1.project-title button:hover{background:var(--panel-3)}
           <input class="input" id="deepgram-key" type="password" spellcheck="false" autocomplete="off" placeholder="填入后优先用 Deepgram diarization" />
           <p class="help">填了它：Deepgram 一次返回转写+时间戳+说话人编号，手机/画外音也能按同一 speaker 聚类；没填则用 DeepSeek ASR，再做上下文复核。</p>
         </div>
+        <div class="field" style="margin-top:10px">
+          <label for="ali-key">阿里云百炼 API Key（说话人分离，可选）</label>
+          <input class="input" id="ali-key" type="password" spellcheck="false" autocomplete="off" placeholder="sk-..." />
+          <label for="ali-file-url" style="margin-top:8px">阿里云 OSS 文件签名 URL（当前视频）</label>
+          <input class="input" id="ali-file-url" type="url" spellcheck="false" placeholder="https://...oss-cn-beijing.aliyuncs.com/...?Expires=..." />
+          <p class="help">把 10–15 分钟视频上传 OSS，生成 1 小时签名 URL 填这里。百炼 Filetrans 会返回句子级 speaker_id；没填则回退 Deepgram/DeepSeek ASR。</p>
+        </div>
         <div class="toggle-row">
           <div><span>代理模式</span><small>Base URL 指向自己的代理，由服务端注入 Key；本页不发送 Authorization</small></div>
           <label class="switch"><input type="checkbox" id="opt-proxy" /><i></i></label>
@@ -1489,6 +1496,8 @@ h1.project-title button:hover{background:var(--panel-3)}
     reasoningOff: true,
     asr: true,
     deepgramKey: '',
+    aliKey: '',
+    aliFileUrl: '',
     stream: true,
     context: true,
     proxyMode: false,
@@ -3694,6 +3703,55 @@ h1.project-title button:hover{background:var(--panel-3)}
     return assigned;
   }
 
+  async function transcribeWithAli(onProgress) {
+    const key = state.settings.aliKey;
+    const fileUrl = state.settings.aliFileUrl;
+    if (!key || !fileUrl) throw new Error('未配置阿里云百炼 Key 或 OSS 文件 URL');
+    const body = JSON.stringify({
+      model: 'qwen-audio-3.1-asr-flash-filetrans',
+      input: { file_urls: [fileUrl] },
+      parameters: { diarization_enabled: true, language_hints: ['zh'], channel_id: [0] }
+    });
+    const submit = await fetch('https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-DashScope-Async': 'enable' },
+      body
+    });
+    if (!submit.ok) throw await apiError(submit);
+    const submitData = await submit.json();
+    const taskId = submitData?.output?.task_id;
+    if (!taskId) throw new Error('阿里云 Filetrans 没有返回 task_id');
+    let task = null;
+    for (let i = 0; i < 300; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const res = await fetch(`https://dashscope.aliyuncs.com/api/v1/tasks/${taskId}`, {
+        headers: { Authorization: `Bearer ${key}` }
+      });
+      if (!res.ok) throw await apiError(res);
+      task = await res.json();
+      const st = task?.output?.task_status;
+      onProgress?.(st || 'RUNNING');
+      if (st === 'SUCCEEDED') break;
+      if (st === 'FAILED') throw new Error('阿里云 Filetrans 任务失败');
+    }
+    const result = task?.output?.output?.results?.[0];
+    if (!result?.transcription_url) throw new Error('阿里云 Filetrans 没有返回结果地址');
+    const tr = await fetch(result.transcription_url);
+    if (!tr.ok) throw await apiError(tr);
+    const data = await tr.json();
+    const sentences = data?.transcripts?.[0]?.sentences || [];
+    if (sentences.length) {
+      return sentences.map((s) => ({
+        start: Number(s.begin_time) / 1000,
+        end: Number(s.end_time) / 1000,
+        speaker: `说话人${Number.isFinite(Number(s.speaker_id)) ? Number(s.speaker_id) : 0}`,
+        text: String(s.text || '').trim()
+      })).filter((s) => s.text);
+    }
+    const text = data?.transcripts?.[0]?.text || '';
+    return text ? [{ start: 0, end: state.project?.duration || 0, speaker: '说话人0', text }] : [];
+  }
+
   async function transcribeWithDeepgram(file) {
     if (!file) throw new Error('原始视频不在内存中');
     const key = state.settings.deepgramKey;
@@ -4096,7 +4154,20 @@ ${lines || '（无台词）'}`;
       if (!state.pendingSubs.length) {
         let asrOk = 0;
         let diarized = 0;
-        if (state.settings.deepgramKey && state.video.file) {
+        if (state.settings.aliKey && state.settings.aliFileUrl) {
+          setComposeProgress(3, '阿里云说话人分离', 'Filetrans 异步任务：转写 + 时间戳 + speaker_id…', 0);
+          try {
+            const utts = await transcribeWithAli((status) => {
+              setComposeProgress(6, '阿里云说话人分离', `任务状态：${status}`, 0);
+            });
+            attachDiarizedUtterances(p.shots, utts);
+            diarized = utts.length;
+            p.diarization = 'aliyun';
+          } catch (e) {
+            console.warn('Aliyun diarization failed, fallback', e);
+          }
+        }
+        if (!diarized && state.settings.deepgramKey && state.video.file) {
           setComposeProgress(3, '说话人分离', 'Deepgram 转写 + diarization，识别每句话的说话人…', 0);
           try {
             const utts = await transcribeWithDeepgram(state.video.file);
@@ -6078,6 +6149,8 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     $('#opt-reasoning-off').checked = state.settings.reasoningOff !== false;
     $('#opt-asr').checked = state.settings.asr !== false;
     $('#deepgram-key').value = state.settings.deepgramKey || '';
+    $('#ali-key').value = state.settings.aliKey || '';
+    $('#ali-file-url').value = state.settings.aliFileUrl || '';
     $('#opt-proxy').checked = !!state.settings.proxyMode;
     $('#test-api-result').textContent = '';
     $('#test-api-result').className = 'help';
@@ -6098,6 +6171,8 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     state.settings.reasoningOff = $('#opt-reasoning-off').checked;
     state.settings.asr = $('#opt-asr').checked;
     state.settings.deepgramKey = $('#deepgram-key').value.trim();
+    state.settings.aliKey = $('#ali-key').value.trim();
+    state.settings.aliFileUrl = $('#ali-file-url').value.trim();
     state.settings.proxyMode = $('#opt-proxy').checked;
     persistSettings();
     renderApiState();
@@ -6726,7 +6801,7 @@ ${shots}`;
     // API / 设置
     $('#api-state').addEventListener('click', openSettings);
     $('#btn-assistant-settings').addEventListener('click', openSettings);
-    ['#api-base', '#api-vision-model', '#api-text-model', '#api-key', '#deepgram-key'].forEach((sel) => {
+    ['#api-base', '#api-vision-model', '#api-text-model', '#api-key', '#deepgram-key', '#ali-key', '#ali-file-url'].forEach((sel) => {
       $(sel).addEventListener('input', syncSettingsFromForm);
     });
     ['#opt-stream', '#opt-context', '#opt-reasoning-off', '#opt-asr', '#opt-proxy'].forEach((sel) => $(sel).addEventListener('change', syncSettingsFromForm));
