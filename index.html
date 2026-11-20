@@ -2816,7 +2816,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     setText('#stat-shots', total);
     const shotsEl = $('#stat-shots');
     if (shotsEl) shotsEl.innerHTML = `${total} <small>个</small>`;
-    setText('#stat-shots-sub', p?.demo ? '示例分镜' : (p ? (p.sceneGrouped ? `${p.hardShotCount || total} 硬切镜头 → ${total} 场景段` : `${p.capturedFrames || total} 采样帧合并`) : '等待载入'));
+    setText('#stat-shots-sub', p?.demo ? '示例分镜' : (p ? (p.sceneGrouped ? `${p.hardShotCount || total} 硬切 → ${p.sceneCount || total} 场景 → ${total} 分镜` : `${p.capturedFrames || total} 采样帧合并`) : '等待载入'));
     setText('#stat-duration', fmtTime(p?.duration || 0, true));
     setText('#stat-duration-sub', p?.width ? `${p.width} × ${p.height}` : '分辨率未知');
     setText('#stat-mode', `${projectMode().fps} fps`);
@@ -2979,7 +2979,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
             <span class="chip">${esc(shot.angle || '视角待补')}</span>
             ${(shot.characters || []).length ? `<span class="chip accent">${esc((shot.characters || []).map((c) => c.name).filter(Boolean).slice(0, 2).join(' / '))}</span>` : ''}
             <span class="chip">${(shot.end - shot.start).toFixed(2)}s</span>
-            ${shot.scene ? `<span class="chip accent">场景段 · ${shot.sceneShotCount || 1} 镜</span>` : ''}
+            ${shot.dialogueSplit ? `<span class="chip accent">对白段 · ${shot.sceneShotCount || 1} 镜</span>` : shot.scene ? `<span class="chip accent">场景段 · ${shot.sceneShotCount || 1} 镜</span>` : ''}
             ${fieldPending ? '<span class="chip warn">字段待补</span>' : ''}
             ${shot.dialogueSource === 'subtitle' ? '<span class="chip accent">字幕</span>' : ''}
             ${shot.aiAnalyzed ? '<span class="chip accent">AI</span>' : ''}
@@ -4220,7 +4220,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     for (const shot of shots) {
       const hit = sorted.filter((u) => u.start < shot.end - .01 && u.end > shot.start + .01);
       if (!hit.length) continue;
-      shot.dialogueLines = hit.map((u) => ({ speaker: u.speaker, text: u.text, tone: '' }));
+      shot.dialogueLines = hit.map((u) => ({ speaker: u.speaker, text: u.text, tone: '', start: u.start, end: u.end }));
       shot.dialogue = hit.map((u) => u.text).join(' / ');
       shot.dialogueSource = 'diarize';
       shot.speakerHints = {};
@@ -4478,7 +4478,7 @@ ${lineText}`;
     const m = String(content).match(/\{[\s\S]*\}/);
     if (!m) throw new Error('台词校对没有返回 JSON');
     const parsed = JSON.parse(m[0]);
-    const corrected = rows.map((r) => ({ row: r, text: r.text, speaker: r.speaker || '' }));
+    const corrected = rows.map((r) => ({ row: r, text: r.text, speaker: r.speaker || '', start: r.start, end: r.end }));
     for (const item of parsed.lines || []) {
       const idx = Number(item.i);
       if (!corrected[idx]) continue;
@@ -4486,18 +4486,18 @@ ${lineText}`;
       corrected[idx].speaker = String(item.speaker || corrected[idx].speaker || '').trim();
     }
     const byShot = new Map();
+    const globalNames = allCastNames(shots);
+    let lastSpeaker = '';
     for (const item of corrected) {
       const row = item.row;
       let speaker = item.speaker;
-      if (!speaker || /^(未知|不明|—|-)$/.test(speaker)) {
-        const names = (row.shot.characters || []).map((c) => c.name).filter(Boolean);
-        const desc = String(row.shot.description || '');
-        if (/手机|电话|视频通话|听筒/.test(desc)) speaker = names.length === 1 ? `手机（${names[0]}）` : '手机画外音';
-        else if (/电视|广播|收音机/.test(desc)) speaker = '电视画外音';
-        else speaker = names.length === 1 ? names[0] : '画外音';
+      if (!speaker || /^(未知|不明|画外音|手机画外音|电视画外音|—|-)$/.test(speaker)) {
+        const names = [...new Set([...(row.shot.characters || []).map((c) => c.name), ...globalNames])].filter(Boolean);
+        speaker = inferDialogueSpeaker(item.text, names, row.shot.description, lastSpeaker);
       }
       if (!byShot.has(row.shot)) byShot.set(row.shot, []);
-      byShot.get(row.shot).push({ text: item.text, speaker, tone: row.tone || '' });
+      byShot.get(row.shot).push({ text: item.text, speaker, tone: row.tone || '', start: item.start, end: item.end });
+      lastSpeaker = speaker;
       row.shot.speakerHints = row.shot.speakerHints || {};
       row.shot.speakerHints[dialogueKey(item.text)] = speaker;
     }
@@ -4619,6 +4619,80 @@ ${lines || '（无台词）'}`;
       else group.push(shot);
     }
     flush();
+    return out;
+  }
+
+
+  function splitScenesByDialogue(shots) {
+    const out = [];
+    const makeSegment = (scene, lines, start, end) => {
+      const dur = Math.max(.1, end - start);
+      const sub = (scene.subShots || []).filter((x) => x.end > start + .01 && x.start < end - .01);
+      return {
+        ...scene,
+        id: uid(),
+        start,
+        end,
+        scene: true,
+        dialogueSplit: true,
+        parentScene: scene.id,
+        sceneShotCount: Math.max(sub.length, 1),
+        subShots: sub.length ? sub : [{ index: scene.index, start, end, description: scene.description || '' }],
+        frameCount: Math.max(1, Math.round((scene.frameCount || 1) * dur / Math.max(.1, scene.end - scene.start))),
+        dialogueLines: lines,
+        dialogue: lines.map((d) => d.text).join(' / '),
+        index: 0
+      };
+    };
+    const splitLongNoDialogue = (scene) => {
+      if (scene.end - scene.start <= 30) return [scene];
+      const parts = Math.ceil((scene.end - scene.start) / 28);
+      const dur = (scene.end - scene.start) / parts;
+      const list = [];
+      for (let i = 0; i < parts; i++) list.push(makeSegment(scene, [], scene.start + i * dur, i === parts - 1 ? scene.end : scene.start + (i + 1) * dur));
+      return list;
+    };
+    for (const scene of shots) {
+      const lines = (scene.dialogueLines || []).filter((d) => d && d.text);
+      if (!lines.length) { out.push(...splitLongNoDialogue(scene)); continue; }
+      const chars = lines.reduce((n, d) => n + String(d.text).length, 0) || 1;
+      let cursor = scene.start;
+      const timed = [];
+      const allTimed = lines.every((d) => Number.isFinite(d.start) && Number.isFinite(d.end) && d.end > d.start);
+      for (const d of lines) {
+        let st, en;
+        if (allTimed) {
+          st = Math.max(scene.start, Number(d.start));
+          en = Math.min(scene.end, Number(d.end));
+        } else {
+          const span = (scene.end - scene.start) * String(d.text).length / chars;
+          st = cursor; en = Math.min(scene.end, cursor + span); cursor = en;
+        }
+        timed.push({ ...d, start: st, end: Math.max(st + .1, en) });
+      }
+      const runs = [];
+      for (const line of timed) {
+        const last = runs[runs.length - 1];
+        if (!last || last.speaker !== line.speaker) runs.push({ speaker: line.speaker, lines: [line] });
+        else last.lines.push(line);
+      }
+      const pieces = [];
+      for (const run of runs) {
+        let chunk = [];
+        for (const line of run.lines) {
+          if (chunk.length && line.end - chunk[0].start > 30) { pieces.push(chunk); chunk = []; }
+          chunk.push(line);
+        }
+        if (chunk.length) pieces.push(chunk);
+      }
+      if (pieces.length <= 1 && scene.end - scene.start <= 30) { out.push(scene); continue; }
+      for (const piece of pieces) {
+        const st = piece[0].start;
+        const en = Math.max(...piece.map((d) => d.end));
+        out.push(makeSegment(scene, piece, st, en));
+      }
+    }
+    out.forEach((s, i) => { s.index = i + 1; });
     return out;
   }
 
@@ -4789,7 +4863,10 @@ ${lines || '（无台词）'}`;
       p.shots = groupShotsIntoScenes(p.shots);
       p.sceneGrouped = true;
       p.sceneCount = p.shots.length;
+      p.shots = splitScenesByDialogue(p.shots);
       p.hardShotCount = hardShotCount;
+      p.shotCount = p.shots.length;
+      p.dialogueSplit = p.shots.length > p.sceneCount;
       applyAutoQC(p.shots);
       p.segmentSource = 'compose-auto';
       state.ui.visibleCount = p.shots.length;
@@ -5468,7 +5545,10 @@ ${lines || '（无台词）'}`;
         state.project.shots = groupShotsIntoScenes(state.project.shots);
         state.project.sceneGrouped = true;
         state.project.sceneCount = state.project.shots.length;
+        state.project.shots = splitScenesByDialogue(state.project.shots);
         state.project.hardShotCount = hardShotCount;
+        state.project.shotCount = state.project.shots.length;
+        state.project.dialogueSplit = state.project.shots.length > state.project.sceneCount;
         if ($('#batch-auto-qc')?.checked) applyAutoQC(state.project.shots);
       }
       renderAll();
@@ -5779,8 +5859,33 @@ ${shot.dialogue || '（无）'}`;
     return [...map.values()].sort((a, b) => b.count - a.count);
   }
 
+
+  function allCastNames(shots) {
+    const names = new Set();
+    for (const s of shots || []) for (const c of s.characters || []) if (c?.name) names.add(c.name);
+    return [...names];
+  }
+
+  function inferDialogueSpeaker(text, names, description = '', lastSpeaker = '') {
+    const list = [...new Set((names || []).filter(Boolean))];
+    const line = String(text || '');
+    const desc = String(description || '');
+    if (!list.length) return /手机|电话|听筒/.test(desc) ? '手机画外音' : '画外音';
+    const mentioned = list.filter((n) => line.includes(n));
+    if (mentioned.length === 1 && list.length > 1) {
+      const others = list.filter((n) => n !== mentioned[0]);
+      if (lastSpeaker && others.includes(lastSpeaker)) return lastSpeaker;
+      return others[0];
+    }
+    if (lastSpeaker && list.includes(lastSpeaker) && !mentioned.includes(lastSpeaker)) return lastSpeaker;
+    if (mentioned.length && !mentioned.includes(lastSpeaker)) return mentioned[0];
+    return list[0] || '画外音';
+  }
+
   function dialogueTimeline(shots) {
     const rows = [];
+    const globalNames = allCastNames(shots);
+    let lastSpeaker = '';
     for (const shot of shots) {
       const lines = (shot.dialogueLines || []).filter((d) => d && d.text);
       const subtitleTexts = String(shot.dialogue || '').split(/\s*\/\s*|\n+/).map((s) => s.trim()).filter(Boolean);
@@ -5788,14 +5893,13 @@ ${shot.dialogue || '（无）'}`;
       if (allTexts.length) {
         for (const text of allTexts) {
           const hit = lines.find((d) => d.text && (d.text.includes(text) || text.includes(d.text)));
-          let speaker = shot.speakerHints?.[dialogueKey(text)] || hit?.speaker || shot.characters?.[0]?.name || '—';
-          if (!speaker || /^(未知|不明|—|-)$/.test(speaker)) {
-            const names = (shot.characters || []).map((c) => c.name).filter(Boolean);
-            const desc = String(shot.description || '');
-            if (/手机|电话|视频通话|听筒/.test(desc)) speaker = names.length === 1 ? `手机（${names[0]}）` : '手机画外音';
-            else speaker = names.length === 1 ? names[0] : '画外音';
+          let speaker = shot.speakerHints?.[dialogueKey(text)] || hit?.speaker || '';
+          if (!speaker || /^(未知|不明|画外音|手机画外音|电视画外音|—|-)$/.test(speaker)) {
+            const names = [...new Set([...(shot.characters || []).map((c) => c.name), ...globalNames])].filter(Boolean);
+            speaker = inferDialogueSpeaker(text, names, shot.description, lastSpeaker);
           }
-          rows.push({ shot, speaker, text, tone: hit?.tone || '' });
+          rows.push({ shot, speaker, text, tone: hit?.tone || '', start: hit?.start, end: hit?.end });
+          lastSpeaker = speaker;
         }
       }
     }
