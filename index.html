@@ -1490,8 +1490,9 @@ h1.project-title button:hover{background:var(--panel-3)}
   };
   const SETTINGS_KEY = 'framecut.settings.v1';
   const MAX_FRAMES = 8000;
-  const SCENE_CUT_DISTANCE = 22;
-  const SCENE_MAX_SECONDS = 6;
+  const SCENE_CUT_DISTANCE = 26;
+  const SCENE_MAX_SECONDS = 60;
+  const SCENE_MIN_SECONDS = 1.2;
   const PAGE_SIZE = 100000;
   const DB_NAME = 'framecut.local.v1';
   const DB_STORE = 'project';
@@ -2894,7 +2895,15 @@ h1.project-title button:hover{background:var(--panel-3)}
       const dist = prev?.metrics?.hash != null && cur?.metrics?.hash != null
         ? hashDistance(prev.metrics.hash, cur.metrics.hash) : null;
       const colorDist = colorDistance(prev?.metrics?.color, cur?.metrics?.color);
-      const cut = (dist != null && dist >= 42) || colorDist >= 160 || (dist != null && dist >= SCENE_CUT_DISTANCE && colorDist >= 70);
+      const next = frames[i + 1];
+      const nextDist = next?.metrics?.hash != null && cur?.metrics?.hash != null
+        ? hashDistance(cur.metrics.hash, next.metrics.hash) : 0;
+      const nextColorDist = colorDistance(cur?.metrics?.color, next?.metrics?.color);
+      // 强画面替换；并且新画面要稳定（下一帧不再剧烈变化），避免把甩镜/连续运动误判为切。
+      const strong = (dist != null && dist >= 48) || colorDist >= 180 || (dist != null && dist >= SCENE_CUT_DISTANCE && colorDist >= 120);
+      const stableAfter = !next || (nextDist < 24 && nextColorDist < 100);
+      const enough = cur.end - current[0].start >= SCENE_MIN_SECONDS;
+      const cut = strong && stableAfter && enough;
       const tooLong = cur.end - current[0].start >= SCENE_MAX_SECONDS;
       if (cut || tooLong) {
         groups.push(current);
