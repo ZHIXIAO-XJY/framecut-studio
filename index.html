@@ -796,6 +796,29 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
   .summary-strip,.restore-banner{margin:0 14px}
   .stat{padding-right:14px;margin-right:14px}
 }
+
+/* 二创工作台 */
+.rewrite-modal{width:min(1180px,96vw);height:min(860px,92dvh);max-height:92dvh;display:flex;flex-direction:column;overflow:hidden}
+.rewrite-modal .modal-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(340px,.88fr) minmax(0,1.12fr);gap:16px;overflow:hidden}
+.rewrite-controls{min-height:0;overflow:auto;padding-right:4px}
+.rewrite-controls .field{margin-top:12px}
+.rewrite-controls .field:first-child{margin-top:0}
+.rewrite-options{display:flex;flex-wrap:wrap;gap:10px;margin-top:11px;font-size:10px;color:var(--muted)}
+.rewrite-options label{display:flex;align-items:center;gap:5px;cursor:pointer}
+.rewrite-result{min-height:0;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:13px;background:var(--panel-2);overflow:hidden}
+.rewrite-result-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);flex:none}
+.rewrite-result-head b{font-size:11px;color:var(--text-soft)}
+.rewrite-result-head span{font:400 9px/1 var(--font-mono);color:var(--faint);margin-left:7px}
+.rewrite-output{margin:0;padding:14px;flex:1;min-height:0;overflow:auto;white-space:pre-wrap;word-break:break-word;font:400 11px/1.75 var(--font-ui);color:var(--text-soft);outline:0}
+.rewrite-output:empty::before{content:'二创结果会显示在这里。';color:var(--faint)}
+#rewrite-status.warn{color:var(--warn)}
+#rewrite-status.ok{color:var(--pass)}
+@media (max-width:900px){
+  .rewrite-modal{width:100%;height:92dvh}
+  .rewrite-modal .modal-body{grid-template-columns:1fr;overflow:auto}
+  .rewrite-controls{overflow:visible}
+  .rewrite-result{min-height:340px;max-height:48dvh}
+}
 </style>
 </head>
 <body>
@@ -855,6 +878,9 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     <div class="api-state" id="api-state" title="点击配置 API">
       <i></i><span id="api-state-text">AI 未配置</span>
     </div>
+    <button class="btn ghost small" id="btn-rewrite" type="button" title="二创工作台">
+      <svg class="icon"><use href="#i-sparkles"/></svg><span>二创</span>
+    </button>
     <button class="icon-btn" id="btn-export-history" type="button" title="历史导出记录" aria-label="历史导出记录">
       <svg class="icon"><use href="#i-history"/></svg>
     </button>
@@ -1364,6 +1390,64 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
 </div>
 
 <!-- ================= AI 批量补全 ================= -->
+<div class="modal-layer" id="modal-rewrite" role="dialog" aria-modal="true" aria-labelledby="rewrite-title">
+  <div class="modal rewrite-modal">
+    <div class="modal-head">
+      <div>
+        <h3 class="modal-title" id="rewrite-title">二创工作台</h3>
+        <div class="modal-sub">独立于原片分镜，按你的要求重写一版可交付剧本</div>
+      </div>
+      <button class="modal-close" type="button" data-close="modal-rewrite" aria-label="关闭"><svg class="icon" style="width:15px;height:15px"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body rewrite-body">
+      <div class="rewrite-controls">
+        <div class="toggle-row">
+          <div><span>启用二创</span><small>关闭后不会调用模型，也不会改动当前项目</small></div>
+          <label class="switch"><input type="checkbox" id="rewrite-enable" checked /><i></i></label>
+        </div>
+        <div class="field">
+          <label for="rewrite-source">原始文案 / 参考剧本</label>
+          <textarea class="textarea" id="rewrite-source" rows="8" placeholder="留空会自动载入当前项目的场景、台词与描述。"></textarea>
+          <div class="inline-row" style="margin-top:6px">
+            <button class="btn small ghost" id="btn-rewrite-load" type="button">载入当前项目</button>
+            <span class="help" id="rewrite-source-meta">未载入</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="rewrite-product">必须原样保留的产品 / 品牌名</label>
+          <input class="input" id="rewrite-product" placeholder="可留空；有产品名时请填，模型会锁定不改" />
+        </div>
+        <div class="field">
+          <label for="rewrite-requirement">二创要求（可留空）</label>
+          <textarea class="textarea" id="rewrite-requirement" rows="5" placeholder="可留空。留空时由系统自主决定：保留爆点与结构，重置人物/关系/场景/职业，改写全部台词，严控字数。"></textarea>
+        </div>
+        <div class="rewrite-options">
+          <label><input type="checkbox" id="rewrite-review" checked /> 附二创自检</label>
+          <label><input type="checkbox" id="rewrite-prompts" checked /> 附分镜/封面提示词</label>
+          <label><input type="checkbox" id="rewrite-cantonese" /> 对白改粤语</label>
+        </div>
+        <div class="inline-row" style="margin-top:12px">
+          <button class="btn primary" id="btn-rewrite-run" type="button"><svg class="icon"><use href="#i-sparkles"/></svg><span>开始二创</span></button>
+          <span class="help" id="rewrite-status">准备就绪</span>
+        </div>
+      </div>
+      <div class="rewrite-result">
+        <div class="rewrite-result-head">
+          <div><b>输出</b><span id="rewrite-count">0 字</span></div>
+          <div class="inline-row">
+            <button class="btn small ghost" id="btn-rewrite-copy" type="button">复制</button>
+            <button class="btn small ghost" id="btn-rewrite-save" type="button">存到项目</button>
+            <button class="btn small" id="btn-rewrite-download" type="button">导出 .md</button>
+          </div>
+        </div>
+        <pre class="rewrite-output" id="rewrite-output">二创结果会显示在这里。
+
+建议先填入产品名称；没有填写时，会按原项目自主二创。</pre>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal-layer drawer-right" id="modal-export-history" role="dialog" aria-modal="true" aria-labelledby="history-title">
   <div class="modal narrow">
     <div class="modal-head">
@@ -1948,6 +2032,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     chat: { messages: [], controller: null, streaming: false },
     exportDir: null,
     exportDirName: '',
+    rewrite: { source: '', output: '', running: false },
     batchAI: { running: false, cancel: false, controller: null, done: 0, total: 0, failed: 0 },
     review: { open: false, list: [], index: 0 }
   };
@@ -6236,6 +6321,191 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     if (!h?.blob) { toast('这条记录只保留了信息，没有保存文件副本。', 'warn'); return; }
     await downloadBlob(h.filename, h.blob, false);
   }
+
+  // ── 二创工作台 ────────────────────────────────────────────
+  function rewriteSourceFromProject() {
+    const p = state.project;
+    if (!p?.shots?.length) return '';
+    const lines = p.shots.map((s) => {
+      const lines = (s.dialogueLines || []).map((d) => `${d.speaker || '画外音'}：${d.text}`).join(' / ') || s.dialogue || '';
+      return `[${fmtTime(s.start)}-${fmtTime(s.end)}] 场景：${s.description || ''}｜${lines}`;
+    });
+    return `${p.title || '未命名项目'}\n${p.summary || ''}\n\n${lines.join('\n')}`.slice(0, 20000);
+  }
+
+  function rewriteCharCount(text) {
+    return String(text || '').replace(/\s/g, '').length;
+  }
+
+  function setRewriteStatus(text, kind = '') {
+    const el = $('#rewrite-status');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'help ' + kind;
+  }
+
+  function updateRewriteSourceMeta() {
+    const el = $('#rewrite-source-meta');
+    if (!el) return;
+    const n = rewriteCharCount($('#rewrite-source').value);
+    el.textContent = n ? `${n} 字` : '未载入';
+  }
+
+  function renderRewriteOutput() {
+    const out = $('#rewrite-output');
+    if (!out) return;
+    out.textContent = state.rewrite.output || '二创结果会显示在这里。\n\n建议先填入产品名称；没有填写时，会按原项目自主二创。';
+    const sourceChars = rewriteCharCount($('#rewrite-source').value);
+    const outChars = rewriteCharCount(state.rewrite.output);
+    $('#rewrite-count').textContent = outChars ? `${outChars} 字 · 原文 ${sourceChars} 字` : '0 字';
+  }
+
+  function openRewrite() {
+    openModal('modal-rewrite');
+    if (!state.project?.rewrite && !$('#rewrite-source').value) {
+      const source = rewriteSourceFromProject();
+      if (source) $('#rewrite-source').value = source;
+    }
+    if (state.project?.rewrite && !state.rewrite.output) {
+      state.rewrite.output = state.project.rewrite.text || '';
+      $('#rewrite-product').value = state.project.rewrite.product || '';
+      $('#rewrite-requirement').value = state.project.rewrite.requirement || '';
+    }
+    updateRewriteSourceMeta();
+    renderRewriteOutput();
+    updateRewriteRunState();
+  }
+
+  function updateRewriteRunState() {
+    const on = $('#rewrite-enable').checked;
+    $('#btn-rewrite-run').disabled = !on;
+    $('#rewrite-status').textContent = on ? (state.rewrite.running ? '生成中…' : '准备就绪') : '二创已关闭';
+    $('#rewrite-status').className = 'help ' + (on ? '' : 'warn');
+  }
+
+  function buildRewritePrompt(source, product, requirement, options) {
+    const chars = rewriteCharCount(source);
+    const min = Math.max(1, Math.floor(chars * .95));
+    const max = Math.ceil(chars * 1.05);
+    const extra = requirement.trim() ? `\n用户额外要求：${requirement.trim()}` : '\n用户未给额外要求：请按下列规则自主决定，不要询问。';
+    const productRule = product.trim()
+      ? `产品/品牌名：${product.trim()}。这个名字必须逐字保留，不能改、不能缩写、不能替换。`
+      : '原文中出现的产品/品牌名必须逐字保留，不能改、不能缩写、不能替换。';
+    const cantonese = options.cantonese
+      ? '\n方言要求：把全部对白改成广东粤语口语，只改对白，其他内容不动；产品名称仍然逐字保留。'
+      : '';
+    const review = options.review
+      ? `\n## 🔍 二创自检\n用短表格逐项写：开头冲突、故事线/转场、逻辑动机、台词丝滑度、商品夸大/资质、公序良俗/医疗违规、同质化风险、爆点对齐、字数偏差。每项：结论 + 修改方案。不能空泛。`
+      : '';
+    const prompts = options.prompts
+      ? `\n## 🎥 AI高光分镜提示词\n提取本剧本情绪最顶点的 3 个画面，写 3 条英文 Prompt，必须含主体、动作、灯光氛围、镜头语言、超高清画质词；不要文字/UI/水印。\n1. ...\n2. ...\n3. ...\n\n## 🖼️ 爆款封面提示词\n写一条影视级封面提示词，竖屏 9:16，主标题必须是楷体艺术字，含画面、标题、字体、排版、光影、色彩、质感；不要 UI 元素。`
+      : '';
+    return `你是顶级短视频/短剧二创架构师，精通爆款逻辑、商业转化和视频号原创审核。请对下面的原始文案做“剥骨抽筋式”整篇重写，不是局部润色，不是同义替换。
+
+【硬性规则】
+1. 保住魂：原文的矛盾冲突核心、情绪拉扯节点、高潮/打脸爆点、商业转化位置，必须 100% 保留；节奏对齐。
+2. 换掉皮：除产品/品牌名外，所有人名、地名、关系、职业、场景、特有道具、标志性形容词、经典句式全部重置；人物关系必须统一，不能前后乱。
+3. 原创审核：不要逐句照搬，不要保留原文句式骨架；开头 3 秒要极致冲突，整体像微信视频号狗血短剧：冲突猛、反转爽、台词短促口语化、带刺。逻辑和动机必须通。
+4. ${productRule} 产品口播/卖点必须自然嵌进新剧情，不能硬插广告；不得夸大功效，不得出现医疗、治疗、治愈、替代药物等违规字眼。
+5. 字数严控：原文 ${chars} 字，目标 ${min}–${max} 字（±5%）。不要用解释、分析、风景、内心独白凑字数。
+6. 不要输出大纲、分析、创作过程；直接给可拍剧本。${cantonese}${extra}
+
+【原始文案】
+${source}
+
+【输出格式】
+## 🎬 剧名：7–12 字，有悬念和网感
+## 🎭 核心人物设定
+- 人物名：身份/性格，极简
+- 人物名：身份/性格，极简
+## 📜 全新重构剧本
+直接写剧情与台词，不要“第一场/第二幕”标注；段落自然过渡。关键动作/音效只用【】极简提示；产品名用 **加粗**。
+${review}${prompts}`;
+  }
+
+  async function runRewrite() {
+    if (!state.settings.apiKey && !state.settings.proxyMode) {
+      toast('请先在「设置」里填入你自己的 API Key，或开启代理模式。', 'warn', 5000);
+      return;
+    }
+    if (!$('#rewrite-enable').checked) { toast('二创已关闭。', 'warn'); return; }
+    const source = $('#rewrite-source').value.trim() || rewriteSourceFromProject();
+    if (!source) { toast('没有可二创的文案：请粘贴原始文案，或先载入当前项目。', 'warn', 5000); return; }
+    if (!$('#rewrite-source').value.trim()) {
+      $('#rewrite-source').value = source;
+      updateRewriteSourceMeta();
+    }
+    const product = $('#rewrite-product').value.trim();
+    const requirement = $('#rewrite-requirement').value.trim();
+    const options = {
+      review: $('#rewrite-review').checked,
+      prompts: $('#rewrite-prompts').checked,
+      cantonese: $('#rewrite-cantonese').checked
+    };
+    state.rewrite.running = true;
+    state.rewrite.source = source;
+    setRewriteStatus('生成中…', '');
+    const btn = $('#btn-rewrite-run');
+    btn.disabled = true;
+    try {
+      const res = await fetch(apiURL(), {
+        method: 'POST', headers: apiHeaders(),
+        body: JSON.stringify({
+          model: state.settings.textModel,
+          ...reasoningOffField(),
+          temperature: .72,
+          max_tokens: 8000,
+          messages: [{ role: 'user', content: buildRewritePrompt(source, product, requirement, options) }]
+        })
+      });
+      if (!res.ok) throw await apiError(res);
+      const data = await res.json();
+      let content = data.choices?.[0]?.message?.content || '';
+      if (Array.isArray(content)) content = content.map((c) => c.text || '').join('\n');
+      content = String(content).trim().replace(/^```(?:markdown|md)?\s*/i, '').replace(/```$/i, '').trim();
+      if (!content) throw new Error('模型没有返回内容');
+      state.rewrite.output = content;
+      renderRewriteOutput();
+      const outChars = rewriteCharCount(content);
+      const srcChars = rewriteCharCount(source);
+      const diff = srcChars ? Math.abs(outChars - srcChars) / srcChars : 0;
+      setRewriteStatus(diff > .05 ? `已生成，字数偏差 ${(diff * 100).toFixed(1)}%（超出 ±5%，建议重跑）` : `已生成，字数偏差 ${(diff * 100).toFixed(1)}%`, diff > .05 ? 'warn' : 'ok');
+      toast(diff > .05 ? '二创完成，但字数偏差超过 5%，建议重跑一次。' : '二创完成。', diff > .05 ? 'warn' : 'success', 5000);
+    } catch (e) {
+      console.error(e);
+      setRewriteStatus('失败：' + (e.message || e), 'warn');
+      toast('二创失败：' + (e.message || e), 'error', 6500);
+    } finally {
+      state.rewrite.running = false;
+      btn.disabled = !$('#rewrite-enable').checked;
+    }
+  }
+
+  async function copyRewrite() {
+    if (!state.rewrite.output) { toast('还没有二创结果。', 'warn'); return; }
+    try { await navigator.clipboard.writeText(state.rewrite.output); toast('已复制二创结果。', 'success'); }
+    catch (e) { toast('复制失败，请手动选择文本。', 'warn'); }
+  }
+
+  function saveRewrite() {
+    if (!state.rewrite.output) { toast('还没有二创结果。', 'warn'); return; }
+    if (!state.project) { toast('当前没有项目。', 'warn'); return; }
+    state.project.rewrite = {
+      text: state.rewrite.output,
+      source: state.rewrite.source,
+      product: $('#rewrite-product').value.trim(),
+      requirement: $('#rewrite-requirement').value.trim(),
+      createdAt: new Date().toISOString()
+    };
+    scheduleAutosave();
+    toast('二创结果已存到当前项目。', 'success');
+  }
+
+  function downloadRewrite() {
+    if (!state.rewrite.output) { toast('还没有二创结果。', 'warn'); return; }
+    downloadText(safeFileName(`${state.project?.title || '项目'}_二创`, 'md'), state.rewrite.output, 'text/markdown;charset=utf-8');
+  }
+
   async function openExportHistory() {
     state.ui.exportHistoryOpen = true;
     openModal('modal-export-history');
@@ -7483,6 +7753,21 @@ ${shots}`;
 
     // API / 设置
     $('#api-state').addEventListener('click', openSettings);
+    $('#btn-rewrite').addEventListener('click', openRewrite);
+    $('#btn-rewrite-load').addEventListener('click', () => {
+      const source = rewriteSourceFromProject();
+      if (!source) { toast('当前项目还没有可载入的文案。', 'warn'); return; }
+      $('#rewrite-source').value = source;
+      state.rewrite.source = source;
+      updateRewriteSourceMeta();
+      toast('已载入当前项目文案。', 'success');
+    });
+    $('#rewrite-source').addEventListener('input', updateRewriteSourceMeta);
+    $('#rewrite-enable').addEventListener('change', updateRewriteRunState);
+    $('#btn-rewrite-run').addEventListener('click', runRewrite);
+    $('#btn-rewrite-copy').addEventListener('click', copyRewrite);
+    $('#btn-rewrite-save').addEventListener('click', saveRewrite);
+    $('#btn-rewrite-download').addEventListener('click', downloadRewrite);
     $('#btn-app-settings').addEventListener('click', openSettings);
     $('#btn-assistant-settings').addEventListener('click', openSettings);
     $('#btn-export-history').addEventListener('click', openExportHistory);
