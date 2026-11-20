@@ -1489,10 +1489,10 @@ h1.project-title button:hover{background:var(--panel-3)}
     theme: 'dark'
   };
   const SETTINGS_KEY = 'framecut.settings.v1';
-  const MAX_FRAMES = 3200;
+  const MAX_FRAMES = 8000;
   const SCENE_CUT_DISTANCE = 22;
   const SCENE_MAX_SECONDS = 6;
-  const PAGE_SIZE = 120;
+  const PAGE_SIZE = 100000;
   const DB_NAME = 'framecut.local.v1';
   const DB_STORE = 'project';
   const DB_KEY = 'current';
@@ -2497,7 +2497,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     } else {
       const remaining = all.length - list.length;
       const more = remaining > 0
-        ? `<div class="load-more"><span>已显示 ${list.length} / ${all.length} 帧</span><button class="btn small" type="button" data-action="load-more">加载更多（剩余 ${remaining} 帧）</button></div>`
+        ? `<div class="load-more"><span>已显示 ${list.length} / ${all.length} 个分镜</span><button class="btn small" type="button" data-action="load-more">加载更多（剩余 ${remaining} 个分镜）</button></div>`
         : '';
       board.innerHTML = list.map(shotCardHTML).join('') + more;
     }
@@ -3637,7 +3637,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     const fd = new FormData();
     fd.append('file', blob, 'framecut-shot.wav');
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 60000);
+    const timer = setTimeout(() => ctrl.abort(), 120000);
     let res;
     try {
       res = await fetch(asrURL(), { method: 'POST', headers: asrHeaders(), body: fd, signal: ctrl.signal });
@@ -3687,25 +3687,30 @@ h1.project-title button:hover{background:var(--panel-3)}
       chunks.push({ start: t, end: Math.min(audio.duration, t + chunkSec) });
     }
     let ok = 0;
+    let failedChunks = 0;
     for (let i = 0; i < chunks.length; i++) {
       if (state.ui.composeStop) break;
-      try {
-        const wav = await sliceShotAudio(audio, chunks[i].start, chunks[i].end);
-        if (wav) {
-          const text = await transcribeAudioBlob(wav);
-          if (text) {
-            const units = splitDialogueUnits(text);
-            const chunkShots = shots.filter((s) => s.start < chunks[i].end - .01 && s.end > chunks[i].start + .01);
-            ok += assignUnitsToShots(units, chunkShots);
-          }
+      let text = '';
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const wav = await sliceShotAudio(audio, chunks[i].start, chunks[i].end);
+          if (wav) text = await transcribeAudioBlob(wav);
+          break;
+        } catch (e) {
+          console.warn('ASR chunk failed', chunks[i].start, attempt, e);
+          if (attempt === 2) failedChunks++;
+          else await sleep(1200);
         }
-      } catch (e) {
-        console.warn('ASR chunk failed', chunks[i].start, e);
+      }
+      if (text) {
+        const units = splitDialogueUnits(text);
+        const chunkShots = shots.filter((s) => s.start < chunks[i].end - .01 && s.end > chunks[i].start + .01);
+        ok += assignUnitsToShots(units, chunkShots);
       }
       onProgress?.(i + 1, chunks.length, ok);
       await sleep(150);
     }
-    return { calls: chunks.length, ok };
+    return { calls: chunks.length, ok, failedChunks };
   }
 
   function reconcileDialogue(shots, frames, subs) {
@@ -3851,9 +3856,10 @@ ${lines || '（无台词）'}`;
           try {
             const asr = await transcribeShotsAudio(p.shots, (done, total, ok) => {
               asrOk = ok;
-              setComposeProgress(3 + (done / total) * 20, '音频转写台词', `${done} / ${total} 音频块 · 识别 ${ok} 条`, 0);
+              setComposeProgress(3 + (done / total) * 20, '音频转写台词', `第 ${done} / ${total} 块 · 识别 ${ok} 条`, 0);
             });
             asrOk = asr.ok;
+            if (asr.failedChunks) asrOk = 0;
           } catch (e) {
             console.warn('ASR unavailable, fallback OCR', e);
           }
@@ -3936,6 +3942,7 @@ ${lines || '（无台词）'}`;
       }
       applyAutoQC(p.shots);
       p.segmentSource = 'compose-auto';
+      state.ui.visibleCount = p.shots.length;
       renderAll();
       scheduleAutosave();
       setComposeProgress(100, state.ui.composeStop ? '已停止合成' : '分镜合成完成', `${p.shots.length} 个分镜 · 合并 ${merged} 个重复段`, failed);
