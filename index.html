@@ -1242,7 +1242,12 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
               <svg class="icon" style="width:15px;height:15px"><use href="#i-eye"/></svg>
             </button>
           </div>
-          <p class="help" id="key-help">Key 只保存在本机 localStorage，本页不会主动上传。默认不内置任何 Key；请填入你自己的 Key，或开启下方「代理模式」。</p>
+          <p class="help" id="key-help">Key 默认只保存在本机 localStorage，本页不会主动上传。默认不内置任何 Key；请填入你自己的 Key，或开启下方「代理模式」。</p>
+          <div class="toggle-row" style="margin-top:9px">
+            <div><span>仅本次会话保存 Key</span><small>开启后不写入 localStorage，关闭页面即清除</small></div>
+            <label class="switch"><input type="checkbox" id="opt-session-keys" /><i></i></label>
+          </div>
+          <button class="btn small ghost" id="btn-clear-api-keys" type="button" style="margin-top:8px">清除本机 Key</button>
         </div>
       </div>
 
@@ -1783,6 +1788,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     deepgramKey: '',
     aliKey: '',
     aliFileUrl: '',
+    sessionKeys: false,
     stream: true,
     context: true,
     proxyMode: false,
@@ -1849,11 +1855,25 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
         : legacy;
     }
     delete stored.model;
-    return { ...DEFAULT_SETTINGS, ...stored };
+    const settings = { ...DEFAULT_SETTINGS, ...stored };
+    if (settings.sessionKeys) {
+      settings.apiKey = '';
+      settings.deepgramKey = '';
+      settings.aliKey = '';
+    }
+    return settings;
   }
 
   function persistSettings() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings)); } catch (e) { /* 私密模式可能禁用 localStorage */ }
+    try {
+      const copy = { ...state.settings };
+      if (copy.sessionKeys) {
+        delete copy.apiKey;
+        delete copy.deepgramKey;
+        delete copy.aliKey;
+      }
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(copy));
+    } catch (e) { /* 私密模式可能禁用 localStorage */ }
   }
 
   function toast(message, type = 'info', ms = 3400) {
@@ -6784,6 +6804,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     $('#opt-context').checked = !!state.settings.context;
     $('#opt-reasoning-off').checked = state.settings.reasoningOff !== false;
     $('#opt-asr').checked = state.settings.asr !== false;
+    $('#opt-session-keys').checked = !!state.settings.sessionKeys;
     $('#deepgram-key').value = state.settings.deepgramKey || '';
     $('#ali-key').value = state.settings.aliKey || '';
     $('#ali-file-url').value = state.settings.aliFileUrl || '';
@@ -6810,6 +6831,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     state.settings.context = $('#opt-context').checked;
     state.settings.reasoningOff = $('#opt-reasoning-off').checked;
     state.settings.asr = $('#opt-asr').checked;
+    state.settings.sessionKeys = $('#opt-session-keys').checked;
     state.settings.deepgramKey = $('#deepgram-key').value.trim();
     state.settings.aliKey = $('#ali-key').value.trim();
     state.settings.aliFileUrl = $('#ali-file-url').value.trim();
@@ -7458,7 +7480,18 @@ ${shots}`;
     ['#api-base', '#api-vision-model', '#api-text-model', '#api-key', '#deepgram-key', '#ali-key', '#ali-file-url'].forEach((sel) => {
       $(sel).addEventListener('input', syncSettingsFromForm);
     });
-    ['#opt-stream', '#opt-context', '#opt-reasoning-off', '#opt-asr', '#opt-proxy'].forEach((sel) => $(sel).addEventListener('change', syncSettingsFromForm));
+    ['#opt-stream', '#opt-context', '#opt-reasoning-off', '#opt-asr', '#opt-proxy', '#opt-session-keys'].forEach((sel) => $(sel).addEventListener('change', syncSettingsFromForm));
+    $('#btn-clear-api-keys').addEventListener('click', () => {
+      $('#api-key').value = '';
+      $('#deepgram-key').value = '';
+      $('#ali-key').value = '';
+      state.settings.apiKey = '';
+      state.settings.deepgramKey = '';
+      state.settings.aliKey = '';
+      persistSettings();
+      renderApiState();
+      toast('已清除本机保存的 API Key。', 'success');
+    });
     $('#btn-key-eye').addEventListener('click', () => {
       const input = $('#api-key');
       input.type = input.type === 'password' ? 'text' : 'password';
