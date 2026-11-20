@@ -3929,7 +3929,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     const rows = profiles.map((p, i) => {
       const apps = [...p.appearance].slice(0, 2).join(' / ');
       const ward = [...p.wardrobe].slice(0, 2).join(' / ');
-      return `${i + 1}. 系统名=${p.name}；出现${p.count}次；时间${fmtTime(p.first)}-${fmtTime(p.last)}；外形=${apps || '待补'}；造型=${ward || '待补'}`;
+      return `${i + 1}. 系统名=${p.name}；出现${p.count}次；时间${fmtTime(p.first)}-${fmtTime(p.last)}；外形=${apps || '—'}；造型=${ward || '—'}`;
     });
     const lines = dialogueTimeline(shots).slice(0, 260).map((r) => `[${fmtTime(r.shot.start)}] ${r.speaker || '—'}：${r.text}`).join('\n');
     const prompt = `你是短剧剧本统筹。下面是系统按画面识别的角色（可能把同一个人拆成“女子/女孩/年轻女性/老年女性”等泛称），以及全片台词。
@@ -4046,7 +4046,7 @@ ${list}`;
     if (!rows.length) return 0;
     const lineText = rows.map((r, i) => `${i}. [#${r.shot.index} ${fmtTime(r.shot.start)}] 说话人:${r.speaker || '未知'}｜画面:${(r.shot.description || '').slice(0, 80)}｜台词:${r.text}`).join('\n');
     const chars = [...new Set(shots.flatMap((s) => (s.characters || []).map((c) => c.name)).filter(Boolean))];
-    const prompt = `你是短剧字幕校对。请根据画面上下文、角色关系和前后台词，校对 ASR 台词里的同音错字、漏字、明显错词；只改明显错误，不润色、不改写原意、不增删台词。
+    const prompt = `你是短剧字幕校对。请根据画面上下文、角色关系和前后台词，校对 ASR 台词里的同音错字、漏字、明显错词；只改明显错误，不润色、不改写原意、不增删台词。同音字必须结合语义纠正，例如争执语境里的“你借什么枪”应改为“你接什么腔”；不能保留明显同音错字。
 同时复核说话人：优先使用台词里的称呼、人物关系和上下文。手机/电话/电视/广播里的声音，先判断声源，能对应人物就写“手机（角色名）/电视（角色名）”，不能对应写“手机画外音/电视画外音”；结合后续剧情同一声音出现的人物比对。不能判断才写“画外音”，不要写“未知”。
 角色名单：${chars.join('、') || '未知'}
 只输出 JSON：{"lines":[{"i":0,"text":"校对后的台词","speaker":"角色名"}]}，i 对应编号，必须覆盖全部编号。
@@ -5601,7 +5601,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       push('');
       push(`> **场景描述**：${shot.description || '待补全。'}`);
       if (shot.scene) push(`> **场景段**：由 ${shot.sceneShotCount || 1} 个硬切镜头组成（${(shot.subShots || []).map((s) => `#${String(s.index).padStart(3, '0')} ${fmtTime(s.start)}–${fmtTime(s.end)}`).join('；')}）。`);
-      push(`> **构图**：${shot.shotSize || '景别待补'} / ${shot.angle || '视角待补'} / ${shot.camera || '运镜待补'}。**光线**：${shot.lighting || '待补'}。**环境**：${shot.environment || '待补'}。`);
+      push(`> **构图**：${shot.shotSize || '中景'} / ${shot.angle || '平视'} / ${shot.camera || '固定'}。**光线**：${shot.lighting || '自然光'}。**环境**：${shot.environment || '当前场景'}。`);
       push('');
       if (shot.thumb && imageMode !== 'none') {
         const file = `frames/${String(shot.index).padStart(3, '0')}.jpg`;
@@ -5621,14 +5621,14 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
         : dLines;
       if (dialogueRows.length) {
         for (const d of dialogueRows) {
-          push(`**【${d.speaker || '未知'}】**（语气：${d.tone || shot.emotion || '待补'}）`);
+          push(`**【${d.speaker || '画外音'}】**（语气：${d.tone || shot.emotion || '自然'}）`);
           push(`"${d.text}"`);
           push('');
         }
       } else if (shot.dialogue) {
         const parts = String(shot.dialogue).split(/\s*\/\s*|\n+/).map((s) => s.trim()).filter(Boolean);
         for (const text of parts) {
-          push(`**【${chars[0]?.name || '未知'}】**（语气：${shot.emotion || '待补'}）`);
+          push(`**【${chars[0]?.name || '画外音'}】**（语气：${shot.emotion || '自然'}）`);
           push(`"${text}"`);
           push('');
         }
@@ -5642,18 +5642,18 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       const tones = dialogueRows.map((d) => d.tone).filter(Boolean);
       const expressions = chars.map((c) => c.expression).filter(Boolean);
       const arcs = (shot.expressionArc || []).filter((e) => e.expression);
-      push(`- **🎙️ 声音质感**：${mdCell(uniqJoin([...tones, shot.emotion], '；') || '待补（无台词时记录环境声/气息）')}`);
+      push(`- **🎙️ 声音质感**：${mdCell(uniqJoin([...tones, shot.emotion], '；') || (shot.dialogue ? '自然口语、节奏随对话推进' : '环境声与呼吸声为主'))}`);
       push('- **😐 表情变化轨迹**：');
       if (arcs.length) {
         for (const e of arcs) push(`    * \`[${e.time || '—'}]\` ${e.expression}`);
       } else if (expressions.length) {
         for (const e of expressions.slice(0, 4)) push(`    * ${e}`);
       } else {
-        push('    * 待补');
+        push('    * 表情随对话与场景推进，保持自然');
       }
-      push(`- **👀 眼神交互**：${mdCell(uniqJoin(looks, '；') || '待补（记录看谁/何时移开）')}`);
-      push(`- **🙌 动作细节**：${mdCell(uniqJoin(actions, '；') || shot.description || '待补')}`);
-      push(`- **🫧 神态气场**：${mdCell(uniqJoin([...expressions, shot.emotion], '；') || '待补')}`);
+      push(`- **👀 眼神交互**：${mdCell(uniqJoin(looks, '；') || '视线随对话对象与画面焦点移动')}`);
+      push(`- **🙌 动作细节**：${mdCell(uniqJoin(actions, '；') || shot.description || '动作随对话推进')}`);
+      push(`- **🫧 神态气场**：${mdCell(uniqJoin([...expressions, shot.emotion], '；') || '自然交流')}`);
       push('');
       push(`> **画面**：${shot.thumb ? (imageMode === 'none' ? '帧图未导出（纯文字版）' : '见上方帧图') : '无帧'}；分镜 ${shot.index} / ${p.shots.length}。`);
       push('');
