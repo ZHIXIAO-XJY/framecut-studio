@@ -819,6 +819,14 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
   .rewrite-controls{overflow:visible}
   .rewrite-result{min-height:340px;max-height:48dvh}
 }
+
+.device-blocked{position:fixed;inset:0;z-index:9999;background:rgba(12,18,20,.72);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:20px}
+.device-blocked[hidden]{display:none!important}
+.device-blocked-card{width:min(420px,100%);background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:28px;box-shadow:var(--shadow);text-align:center}
+.device-blocked-kicker{font:600 9px/1 var(--font-mono);letter-spacing:.18em;color:var(--danger)}
+.device-blocked-card h2{font-size:22px;letter-spacing:-.03em;margin:12px 0 6px}
+.device-blocked-card p{font-size:11px;line-height:1.8;color:var(--muted);margin:0 0 18px}
+.device-blocked-card small{font-size:9px;color:var(--faint)}
 </style>
 </head>
 <body>
@@ -4770,6 +4778,78 @@ ${lines || '（无台词）'}`;
     return out;
   }
 
+
+  // ── 设备在线管理（独立后台）────────────────────────────
+  const DEVICE_ADMIN_URL = (localStorage.getItem('framecut.deviceAdminUrl') || 'https://baiyexing-device-admin.onrender.com').replace(/\/+$/, '');
+  const APP_VERSION = '1.5.4';
+  let deviceHeartbeatTimer = null;
+  function deviceStorage(key) { try { return localStorage.getItem(key) || ''; } catch (e) { return ''; } }
+  function setDeviceStorage(key, value) { try { localStorage.setItem(key, value); } catch (e) {} }
+  function deviceId() {
+    let id = deviceStorage('framecut.device.id');
+    if (!/^[A-Za-z0-9_-]{8,80}$/.test(id)) {
+      id = 'dev_' + ([...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join(''));
+      setDeviceStorage('framecut.device.id', id);
+    }
+    return id;
+  }
+  function devicePlatform() { return window.FRAMECUT_NATIVE ? 'desktop' : 'web'; }
+  function deviceName() { return (navigator.platform || 'Web') + ' · 白夜行'; }
+  function showDeviceBlocked(reason) {
+    if (deviceHeartbeatTimer) clearInterval(deviceHeartbeatTimer);
+    const el = $('#device-blocked');
+    if (!el) return;
+    $('#device-blocked-reason').textContent = reason || '如需继续使用，请联系管理员恢复设备。';
+    el.hidden = false;
+  }
+  async function deviceRegister() {
+    const res = await fetch(DEVICE_ADMIN_URL + '/api/device/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId: deviceId(), name: deviceName(), platform: devicePlatform(), appVersion: APP_VERSION })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) { showDeviceBlocked(data.message); return false; }
+    if (!res.ok || !data.token) return false;
+    setDeviceStorage('framecut.device.token', data.token);
+    return true;
+  }
+  async function deviceReportOpen() {
+    if (!DEVICE_ADMIN_URL) return;
+    let token = deviceStorage('framecut.device.token');
+    if (!token) {
+      if (!(await deviceRegister())) return;
+      token = deviceStorage('framecut.device.token');
+    }
+    const p = state.project || {};
+    const res = await fetch(DEVICE_ADMIN_URL + '/api/device/open', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Device-Token': token },
+      body: JSON.stringify({ deviceId: deviceId(), projectTitle: p.title || '', mode: p.mode || '', sceneCount: (p.shots || []).length, currentView: '工作台' })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403) { showDeviceBlocked(data.message); return; }
+    if (res.status === 401) { setDeviceStorage('framecut.device.token', ''); await deviceRegister(); }
+  }
+  async function deviceHeartbeat() {
+    if (!DEVICE_ADMIN_URL) return;
+    const token = deviceStorage('framecut.device.token');
+    if (!token) return;
+    const p = state.project || {};
+    try {
+      const res = await fetch(DEVICE_ADMIN_URL + '/api/device/heartbeat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Device-Token': token },
+        body: JSON.stringify({ deviceId: deviceId(), projectTitle: p.title || '', mode: p.mode || '', sceneCount: (p.shots || []).length, currentView: '工作台' })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 403) showDeviceBlocked(data.message);
+    } catch (e) { /* 后台不可达时不影响本地使用 */ }
+  }
+  function startDeviceTelemetry() {
+    if (!DEVICE_ADMIN_URL) return;
+    deviceReportOpen().catch(() => {});
+    if (deviceHeartbeatTimer) clearInterval(deviceHeartbeatTimer);
+    deviceHeartbeatTimer = setInterval(() => deviceHeartbeat(), 30000);
+  }
+
   async function composeShots() {
     if (state.ui.composing) return;
     const p = state.project;
@@ -7951,6 +8031,7 @@ ${shots}`;
     $('#btn-choose-export-dir').addEventListener('click', chooseExportDir);
     $('#btn-clear-export-dir').addEventListener('click', clearExportDir);
     loadExportDirHandle();
+    setTimeout(startDeviceTelemetry, 800);
     ['#api-base', '#api-vision-model', '#api-text-model', '#api-key', '#deepgram-key', '#ali-key', '#ali-file-url'].forEach((sel) => {
       $(sel).addEventListener('input', syncSettingsFromForm);
     });
@@ -8246,5 +8327,14 @@ ${shots}`;
   }
 })();
 </script>
+
+<div id="device-blocked" class="device-blocked" hidden>
+  <div class="device-blocked-card">
+    <div class="device-blocked-kicker">DEVICE OFFLINE</div>
+    <h2>此设备已被管理员下线</h2>
+    <p id="device-blocked-reason">如需继续使用，请联系管理员恢复设备。</p>
+    <small>白夜行 · 设备管理</small>
+  </div>
+</div>
 </body>
 </html>
