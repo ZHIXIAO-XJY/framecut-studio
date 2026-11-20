@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="dark">
+<html lang="zh-CN" data-theme="light">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -680,6 +680,84 @@ h1.project-title{font-size:clamp(24px,2.35vw,31px);font-weight:500;letter-spacin
   .stats-row{gap:0}
   .stat{padding-right:14px;margin-right:14px;min-width:72px}
   .stat-value{font-size:17px}
+  .summary-strip,.restore-banner{margin:0 14px}
+}
+
+/* ============================================================
+   方案 B · 冷雾蓝 / 银灰
+   ============================================================ */
+html[data-theme="light"]{
+  --bg:#edf1f3;--bg-deep:#e2e9ec;--panel:#fbfdfe;--panel-2:#f2f6f8;--panel-3:#e8eef1;
+  --line:rgba(21,37,46,.10);--line-strong:rgba(21,37,46,.19);
+  --text:#15252e;--text-soft:#31434c;--muted:#6d7f88;--faint:#9cabb2;
+  --accent:#2e6f8a;--accent-soft:rgba(46,111,138,.09);--accent-ink:#ffffff;
+  --cyan:#4b8ba3;--cyan-soft:rgba(75,139,163,.09);
+  --warn:#94641c;--warn-soft:rgba(148,100,28,.09);
+  --danger:#a64848;--danger-soft:rgba(166,72,72,.08);
+  --pass:#2f7d62;--pass-soft:rgba(47,125,98,.09);
+  --shadow:0 24px 60px rgba(31,55,67,.12);--grid-dot:rgba(21,37,46,.045);--scrim:rgba(25,40,46,.30);
+}
+html[data-theme="dark"]{
+  --bg:#0b1115;--bg-deep:#070c0f;--panel:#101a20;--panel-2:#142129;--panel-3:#1b2b34;
+  --line:rgba(229,241,245,.08);--line-strong:rgba(229,241,245,.16);
+  --text:#e9eef0;--text-soft:#c5d2d7;--muted:#8fa4ad;--faint:#5f747e;
+  --accent:#7fb8c9;--accent-soft:rgba(127,184,201,.12);--accent-ink:#071014;
+  --cyan:#9acbda;--cyan-soft:rgba(154,203,218,.10);
+  --warn:#e0b36b;--warn-soft:rgba(224,179,107,.10);
+  --danger:#e18a8a;--danger-soft:rgba(225,138,138,.10);
+  --pass:#7fcfb0;--pass-soft:rgba(127,207,176,.10);
+  --shadow:0 28px 80px rgba(0,0,0,.46);--grid-dot:rgba(229,241,245,.035);--scrim:rgba(3,8,11,.70);
+}
+body{background:radial-gradient(900px 540px at 78% -10%,var(--accent-soft),transparent 64%),radial-gradient(720px 480px at 4% 104%,var(--cyan-soft),transparent 66%),var(--bg)}
+body::before{opacity:.3}
+.brand-name{font-family:var(--font-ui);font-size:17px;font-weight:750;letter-spacing:.12em}
+h1.project-title{font-family:var(--font-ui);font-weight:600;font-size:clamp(23px,2.2vw,29px);letter-spacing:-.03em}
+.project-desc{color:var(--muted)}
+.board-head{background:color-mix(in srgb,var(--bg) 88%,transparent)}
+.eyebrow .bar{background:var(--accent)}
+.stats-row{gap:0;border-top-color:var(--line)}
+.stat{border-right:0;padding:0 34px 0 0;margin:0 34px 0 0}
+.stat:last-child{padding-right:0;margin-right:0}
+.stat-label{color:var(--faint)}
+.stat-value{font-weight:600}
+.toolbar{border-top-color:var(--line);border-bottom-color:var(--line)}
+.seg{background:var(--panel-2)}
+.seg button.on{background:var(--panel);color:var(--text);box-shadow:0 1px 3px rgba(21,37,46,.08)}
+.search input{background:var(--panel-2);border:1px solid transparent}
+.summary-strip{background:var(--panel-2);border:1px solid var(--line)}
+.summary-strip .icon{color:var(--accent)}
+.restore-banner{background:var(--warn-soft)}
+.board{gap:18px;padding-top:20px}
+.shot-card{border:1px solid var(--line);border-radius:18px;background:var(--panel);box-shadow:0 1px 2px rgba(21,37,46,.04),0 10px 28px rgba(21,37,46,.04)}
+.shot-card:hover{border-color:var(--line-strong);box-shadow:0 2px 4px rgba(21,37,46,.05),0 18px 42px rgba(21,37,46,.09)}
+.shot-body{padding:13px 14px 0}
+.dialogue{border-left-color:var(--accent)}
+.dialogue .mark{color:var(--accent)}
+.shot-index,.shot-tc{background:rgba(10,24,30,.58);border-color:rgba(255,255,255,.10)}
+.shot-context{color:var(--faint)}
+.chip{background:var(--panel-2)}
+.chip.accent{background:var(--accent-soft);color:var(--accent)}
+.shot-actions{border-top-color:var(--line)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);box-shadow:0 5px 16px color-mix(in srgb,var(--accent) 22%,transparent)}
+.settings-block{background:var(--panel-2);border:1px solid var(--line)}
+.modal{border:1px solid var(--line)}
+.modal-layer.drawer-right .modal{box-shadow:-26px 0 80px rgba(21,37,46,.18)}
+html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px rgba(0,0,0,.42)}
+.input,.select,.textarea{background:var(--panel-2)}
+.sidebar{background:color-mix(in srgb,var(--panel) 55%,transparent)}
+.side-section{border-bottom-color:var(--line)}
+.dropzone{background:color-mix(in srgb,var(--panel-2) 70%,transparent)}
+.dz-icon{color:var(--accent)}
+.video-card{border:1px solid var(--line);box-shadow:0 8px 24px rgba(21,37,46,.05)}
+#btn-method:hover,.icon-btn:hover,.api-state:hover{background:var(--panel-2)}
+@media (max-width:1180px){
+  .board-head{padding:18px 20px 0}
+  .board{padding:16px 20px 56px}
+  .summary-strip,.restore-banner{margin:0 20px}
+}
+@media (max-width:760px){
+  .board-head{padding:14px 14px 0}
+  .board{padding:12px 14px 48px}
   .summary-strip,.restore-banner{margin:0 14px}
 }
 </style>
@@ -1659,7 +1737,7 @@ h1.project-title{font-size:clamp(24px,2.35vw,31px);font-weight:500;letter-spacin
     stream: true,
     context: true,
     proxyMode: false,
-    theme: 'dark'
+    theme: 'light'
   };
   const SETTINGS_KEY = 'framecut.settings.v1';
   const MAX_FRAMES = 8000;
