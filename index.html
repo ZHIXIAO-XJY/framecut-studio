@@ -3916,6 +3916,55 @@ ${list}`;
     return count;
   }
 
+  async function resolveDialogueProofread(shots) {
+    const rows = dialogueTimeline(shots).slice(0, 260);
+    if (!rows.length) return 0;
+    const lineText = rows.map((r, i) => `${i}. [#${r.shot.index} ${fmtTime(r.shot.start)}] 说话人:${r.speaker || '未知'}｜画面:${(r.shot.description || '').slice(0, 80)}｜台词:${r.text}`).join('\n');
+    const chars = [...new Set(shots.flatMap((s) => (s.characters || []).map((c) => c.name)).filter(Boolean))];
+    const prompt = `你是短剧字幕校对。请根据画面上下文、角色关系和前后台词，校对 ASR 台词里的同音错字、漏字、明显错词；只改明显错误，不润色、不改写原意、不增删台词。
+同时复核说话人：优先使用台词里的称呼、人物关系和上下文；不确定时写“画外音”，不要写“未知”。
+角色名单：${chars.join('、') || '未知'}
+只输出 JSON：{"lines":[{"i":0,"text":"校对后的台词","speaker":"角色名"}]}，i 对应编号，必须覆盖全部编号。
+台词：
+${lineText}`;
+    const res = await fetch(apiURL(), {
+      method: 'POST', headers: apiHeaders(),
+      body: JSON.stringify({ model: state.settings.textModel, ...reasoningOffField(), temperature: .1, max_tokens: 2600, messages: [{ role: 'user', content: prompt }] })
+    });
+    if (!res.ok) throw await apiError(res);
+    const data = await res.json();
+    let content = data.choices?.[0]?.message?.content || '';
+    if (Array.isArray(content)) content = content.map((c) => c.text || '').join('\n');
+    const m = String(content).match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('台词校对没有返回 JSON');
+    const parsed = JSON.parse(m[0]);
+    const corrected = rows.map((r) => ({ row: r, text: r.text, speaker: r.speaker || '' }));
+    for (const item of parsed.lines || []) {
+      const idx = Number(item.i);
+      if (!corrected[idx]) continue;
+      corrected[idx].text = String(item.text || corrected[idx].text).trim() || corrected[idx].text;
+      corrected[idx].speaker = String(item.speaker || corrected[idx].speaker || '').trim();
+    }
+    const byShot = new Map();
+    for (const item of corrected) {
+      const row = item.row;
+      let speaker = item.speaker;
+      if (!speaker || /^(未知|不明|—|-)$/.test(speaker)) {
+        const names = (row.shot.characters || []).map((c) => c.name).filter(Boolean);
+        speaker = names.length === 1 ? names[0] : '画外音';
+      }
+      if (!byShot.has(row.shot)) byShot.set(row.shot, []);
+      byShot.get(row.shot).push({ text: item.text, speaker, tone: row.tone || '' });
+      row.shot.speakerHints = row.shot.speakerHints || {};
+      row.shot.speakerHints[dialogueKey(item.text)] = speaker;
+    }
+    for (const [shot, lines] of byShot) {
+      shot.dialogueLines = lines;
+      shot.dialogue = lines.map((d) => d.text).join(' / ');
+    }
+    return byShot.size;
+  }
+
   async function resolveCastProfiles(shots) {
     const profiles = characterProfiles(shots).slice(0, 20);
     if (!profiles.length) return 0;
@@ -4073,7 +4122,13 @@ ${lines || '（无台词）'}`;
       } catch (e) {
         console.warn('speaker resolve failed', e);
       }
-      setComposeProgress(96, '补全角色档案', '生成声音/语速/气息/微表情/情绪外化，清掉“待补”…', failed);
+      setComposeProgress(95, '台词校对', '纠正同音错字/漏字，并把“未知”说话人落到具体角色…', failed);
+      try {
+        await resolveDialogueProofread(p.shots);
+      } catch (e) {
+        console.warn('dialogue proofread failed', e);
+      }
+      setComposeProgress(97, '补全角色档案', '生成声音/语速/气息/微表情/情绪外化，清掉“待补”…', failed);
       try {
         await resolveCastProfiles(p.shots);
       } catch (e) {
@@ -4741,6 +4796,7 @@ ${lines || '（无台词）'}`;
         state.project.dialogueDeduped = dedupeAcrossShots(state.project.shots);
         try { await resolveCastNames(state.project.shots); } catch (e) { console.warn('cast name resolve failed', e); }
         try { await resolveDialogueSpeakers(state.project.shots); } catch (e) { console.warn('speaker resolve failed', e); }
+        try { await resolveDialogueProofread(state.project.shots); } catch (e) { console.warn('dialogue proofread failed', e); }
         try { await resolveCastProfiles(state.project.shots); } catch (e) { console.warn('cast profile resolve failed', e); }
         if ($('#batch-auto-qc')?.checked) applyAutoQC(state.project.shots);
       }
@@ -5061,12 +5117,9 @@ ${shot.dialogue || '（无）'}`;
       if (allTexts.length) {
         for (const text of allTexts) {
           const hit = lines.find((d) => d.text && (d.text.includes(text) || text.includes(d.text)));
-          rows.push({
-            shot,
-            speaker: shot.speakerHints?.[dialogueKey(text)] || hit?.speaker || shot.characters?.[0]?.name || '—',
-            text,
-            tone: hit?.tone || ''
-          });
+          let speaker = shot.speakerHints?.[dialogueKey(text)] || hit?.speaker || shot.characters?.[0]?.name || '—';
+          if (!speaker || /^(未知|不明|—|-)$/.test(speaker)) speaker = (shot.characters || []).length === 1 ? shot.characters[0].name : '画外音';
+          rows.push({ shot, speaker, text, tone: hit?.tone || '' });
         }
       }
     }
@@ -5306,7 +5359,9 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       const dialogueRows = subtitleParts.length > dLines.length
         ? subtitleParts.map((text) => {
             const hit = dLines.find((d) => d.text && (d.text.includes(text) || text.includes(d.text)));
-            return { speaker: hit?.speaker || (chars.length === 1 ? chars[0].name : '未知'), text, tone: hit?.tone || shot.emotion || '' };
+            let speaker = hit?.speaker || (chars.length === 1 ? chars[0].name : '');
+            if (!speaker || /^(未知|不明|—|-)$/.test(speaker)) speaker = chars.length === 1 ? chars[0].name : '画外音';
+            return { speaker, text, tone: hit?.tone || shot.emotion || '' };
           })
         : dLines;
       if (dialogueRows.length) {
