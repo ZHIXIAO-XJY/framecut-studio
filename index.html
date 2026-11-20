@@ -4295,7 +4295,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
         const key = dialogueKey(text);
         if (!key) continue;
         const prev = seen.get(key);
-        if (prev && shot.start - prev.end < 5) {
+        if (prev && shot.start - prev.end < 20) {
           // 同一句在相邻分镜重复出现：保留最早出现的那个分镜，避免声音跨切点复制。
           removed++;
           continue;
