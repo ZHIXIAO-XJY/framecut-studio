@@ -775,6 +775,27 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
 .history-main small{font:400 9px/1.5 var(--font-mono);color:var(--faint)}
 .history-actions{display:flex;flex-direction:column;gap:2px;align-items:flex-end;flex:none}
 .history-actions .link-btn{font-size:9px;padding:1px 0}
+
+/* B 方案的移动端收口（必须放在最后，避免覆盖 1180 断点） */
+@media (max-width:1180px){
+  body{overflow:auto}
+  .workspace{grid-template-columns:1fr;height:auto;min-height:calc(100dvh - 60px)}
+  .sidebar{max-height:none;overflow:visible;border-right:0;border-bottom:1px solid var(--line)}
+  .side-section{max-width:760px;margin:0 auto}
+  .main{min-height:70dvh}
+  .brand{width:auto;border-right:0;padding-right:6px}
+  .brand-sub{display:none}
+  .top-main{display:none}
+  .top-actions{margin-left:auto}
+}
+@media (max-width:760px){
+  body{overflow:auto}
+  .workspace{grid-template-columns:1fr;min-height:calc(100dvh - 56px)}
+  .board{grid-template-columns:1fr}
+  .head-actions{justify-content:flex-start}
+  .summary-strip,.restore-banner{margin:0 14px}
+  .stat{padding-right:14px;margin-right:14px}
+}
 </style>
 </head>
 <body>
