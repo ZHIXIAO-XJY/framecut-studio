@@ -3885,7 +3885,7 @@ ${lines || '（无台词）'}`;
 角色名单：${chars.join('、') || '未知'}
 规则：
 1. 不能默认把第一句给第一个角色；必须根据台词里的称呼/语义和上下文判断。
-2. 不能确定时写“不明”，不要硬猜。
+2. 手机/电话/电视/广播里的声音，先判断声源：能对应人物就写“手机（角色名）/电视（角色名）”，不能对应就写“手机画外音/电视画外音”；结合后续剧情里同一声音出现的人物进行比对。不能判断才写“画外音”，不要写“未知”。
 3. 只输出 JSON：{"lines":[{"i":0,"speaker":"角色名"}]}，i 对应下面编号。
 台词列表：
 ${list}`;
@@ -3922,7 +3922,7 @@ ${list}`;
     const lineText = rows.map((r, i) => `${i}. [#${r.shot.index} ${fmtTime(r.shot.start)}] 说话人:${r.speaker || '未知'}｜画面:${(r.shot.description || '').slice(0, 80)}｜台词:${r.text}`).join('\n');
     const chars = [...new Set(shots.flatMap((s) => (s.characters || []).map((c) => c.name)).filter(Boolean))];
     const prompt = `你是短剧字幕校对。请根据画面上下文、角色关系和前后台词，校对 ASR 台词里的同音错字、漏字、明显错词；只改明显错误，不润色、不改写原意、不增删台词。
-同时复核说话人：优先使用台词里的称呼、人物关系和上下文；不确定时写“画外音”，不要写“未知”。
+同时复核说话人：优先使用台词里的称呼、人物关系和上下文。手机/电话/电视/广播里的声音，先判断声源，能对应人物就写“手机（角色名）/电视（角色名）”，不能对应写“手机画外音/电视画外音”；结合后续剧情同一声音出现的人物比对。不能判断才写“画外音”，不要写“未知”。
 角色名单：${chars.join('、') || '未知'}
 只输出 JSON：{"lines":[{"i":0,"text":"校对后的台词","speaker":"角色名"}]}，i 对应编号，必须覆盖全部编号。
 台词：
@@ -3951,7 +3951,10 @@ ${lineText}`;
       let speaker = item.speaker;
       if (!speaker || /^(未知|不明|—|-)$/.test(speaker)) {
         const names = (row.shot.characters || []).map((c) => c.name).filter(Boolean);
-        speaker = names.length === 1 ? names[0] : '画外音';
+        const desc = String(row.shot.description || '');
+        if (/手机|电话|视频通话|听筒/.test(desc)) speaker = names.length === 1 ? `手机（${names[0]}）` : '手机画外音';
+        else if (/电视|广播|收音机/.test(desc)) speaker = '电视画外音';
+        else speaker = names.length === 1 ? names[0] : '画外音';
       }
       if (!byShot.has(row.shot)) byShot.set(row.shot, []);
       byShot.get(row.shot).push({ text: item.text, speaker, tone: row.tone || '' });
@@ -5118,7 +5121,12 @@ ${shot.dialogue || '（无）'}`;
         for (const text of allTexts) {
           const hit = lines.find((d) => d.text && (d.text.includes(text) || text.includes(d.text)));
           let speaker = shot.speakerHints?.[dialogueKey(text)] || hit?.speaker || shot.characters?.[0]?.name || '—';
-          if (!speaker || /^(未知|不明|—|-)$/.test(speaker)) speaker = (shot.characters || []).length === 1 ? shot.characters[0].name : '画外音';
+          if (!speaker || /^(未知|不明|—|-)$/.test(speaker)) {
+            const names = (shot.characters || []).map((c) => c.name).filter(Boolean);
+            const desc = String(shot.description || '');
+            if (/手机|电话|视频通话|听筒/.test(desc)) speaker = names.length === 1 ? `手机（${names[0]}）` : '手机画外音';
+            else speaker = names.length === 1 ? names[0] : '画外音';
+          }
           rows.push({ shot, speaker, text, tone: hit?.tone || '' });
         }
       }
@@ -5291,13 +5299,16 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     push('## 📋 角色档案');
     push('');
     if (!profiles.length) {
-      push('> 暂无人物数据。先运行「AI 补全」，或在分镜编辑里填写人物特征。');
+      push('> 暂无人物数据。');
     } else {
+      push('| 角色 | 身份 | 外形 | 造型 | 出现 | 神态 |');
+      push('|---|---|---|---|---|---|');
       for (const c of profiles) {
         const app = [...c.appearance];
         const ward = [...c.wardrobe];
         const exp = [...c.expressions];
-        push(`- **【${c.name}】**：${app[0] || '外貌待补'}${app.length > 1 ? '（多次识别有差异，以关键帧为准）' : ''}。**造型**：${ward[0] || '造型待补'}${ward.length > 1 ? '（多次识别有差异，以关键帧为准）' : ''}。**出现**：${fmtTime(c.first)}–${fmtTime(c.last)}，共 ${c.count} 个分镜。**神态关键词**：${uniqJoin(exp.slice(0, 3), '；') || '待补'}。`);
+        const cp = (p.castProfiles || {})[c.name] || {};
+        push(`| ${mdCell(c.name)} | ${mdCell(cp.role || '—')} | ${mdCell(app[0] || '—')} | ${mdCell(ward[0] || '—')} | ${fmtTime(c.first)}–${fmtTime(c.last)}（${c.count} 镜） | ${mdCell(uniqJoin(exp.slice(0, 3), '；') || '—')} |`);
       }
     }
     push('');
@@ -5308,7 +5319,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     if (profiles.length) {
       for (const c of profiles) {
         const w = [...c.wardrobe];
-        push(`| ${mdCell(c.name)} | ${mdCell(w[0] || '待补')} | ${mdCell(w[1] || '—')} | ${w.length > 1 ? 'AI 多次描述有差异，需关键帧复核是否换装' : '全片同一套'} |`);
+        push(`| ${mdCell(c.name)} | ${mdCell(w[0] || '—')} | ${mdCell(w[1] || '—')} | ${w.length > 1 ? 'AI 多次描述有差异，需关键帧复核是否换装' : '全片同一套'} |`);
       }
     } else {
       push('| — | — | — | — |');
@@ -5408,12 +5419,12 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
 
     push('## 📜 全片台词总表');
     push('');
-    push('| 时间 | 说话人 | 台词 | 语气 |');
+    push('| 分镜 | 时间区间 | 说话人 | 台词 |');
     push('|---|---|---|---|');
     if (dialogueRows.length) {
-      for (const r of dialogueRows) push(`| ${fmtTime(r.shot.start)} | ${mdCell(r.speaker || '—')} | ${mdCell(r.text)} | ${mdCell(r.tone || '—')} |`);
+      for (const r of dialogueRows) push(`| #${String(r.shot.index).padStart(3, '0')} | ${fmtTime(r.shot.start)}–${fmtTime(r.shot.end)} | ${mdCell(r.speaker || '—')} | ${mdCell(r.text)} |`);
     } else {
-      push('| — | — | 未提取到台词 | — |');
+      push('| — | — | — | 未提取到台词 |');
     }
     push('');
     push('---');
@@ -5421,34 +5432,15 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     push('## 🎬 表演提示单（按角色）');
     push('');
     if (!profiles.length) {
-      push('（暂无人物质料，先运行 AI 补全。）');
+      push('（暂无人物资料。）');
     } else {
       for (const c of profiles) {
         const shotsOf = p.shots.filter((s) => (s.characters || []).some((x) => x.name === c.name));
         const arcs = shotsOf.flatMap((s) => (s.expressionArc || []).map((e) => `${fmtTime(s.start)} ${e.expression}`)).slice(0, 8);
-        push(`- **【${c.name}】**：${uniqJoin(arcs, '；') || uniqJoin([...c.expressions], '；') || '情绪曲线待补'}`);
+        push(`- **【${c.name}】**：${uniqJoin(arcs, '；') || uniqJoin([...c.expressions], '；') || '自然表演'}`);
       }
     }
     push('');
-    push('---');
-    push('');
-
-    push('## 🧩 交付说明');
-    push('');
-    push(`- 本文件由 FrameCut 拆镜台根据 **${p.shots.length} 个采样分镜**生成。`);
-    push(`- 抽帧模式：${meta.mode}；原始文件：${meta.fileName}；分辨率：${meta.resolution}；时长：${meta.duration}。`);
-    push('- AI 辅助内容、人物称谓、说话人归属、品牌与价格仍需人工复核。');
-    push('- 「待补」不等于无内容；空镜、无台词镜头可保留为空。');
-    push('');
-    push('## 🔍 数据校验');
-    push('');
-    push(`- 分镜总数：${p.shots.length}`);
-    push(`- 画面通过：${counts.pass}；待确认：${counts.warn}；异常：${counts.fail}`);
-    push(`- 人物档案：${profiles.length} 人`);
-    push(`- 台词条目：${dialogueRows.length}`);
-    push(`- 导出时间：${new Date().toLocaleString('zh-CN')}`);
-    push('');
-    push('> 参考交付格式：高精度脚本还原（角色档案 → 造型变更 → 语气神态总表 → 逐段五维脚本 → 校验记录）。');
     return out.join('\n');
   }
 
