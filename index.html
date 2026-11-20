@@ -760,6 +760,19 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
   .board{padding:12px 14px 48px}
   .summary-strip,.restore-banner{margin:0 14px}
 }
+
+/* 本机导出历史 */
+.history-empty{display:flex;flex-direction:column;align-items:center;gap:5px;padding:42px 16px;border:1px dashed var(--line-strong);border-radius:14px;color:var(--faint);text-align:center}
+.history-empty b{font-size:12px;color:var(--text-soft);font-weight:600}
+.history-empty span{font-size:10px;line-height:1.6;max-width:280px}
+.history-item{display:flex;align-items:flex-start;gap:10px;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:var(--panel-2);margin-bottom:8px}
+.history-icon{width:34px;height:34px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font:700 8px/1 var(--font-mono);flex:none;text-transform:uppercase}
+.history-main{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.history-main b{font-size:10.5px;color:var(--text-soft);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.history-main span{font-size:9.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.history-main small{font:400 9px/1.5 var(--font-mono);color:var(--faint)}
+.history-actions{display:flex;flex-direction:column;gap:2px;align-items:flex-end;flex:none}
+.history-actions .link-btn{font-size:9px;padding:1px 0}
 </style>
 </head>
 <body>
@@ -798,6 +811,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
   <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M4 12h16m0 0-6-6m6 6-6 6"/></symbol>
   <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
   <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.4 3 8.2 7 10 4-1.8 7-5.6 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/></symbol>
 </svg>
 
@@ -818,6 +832,9 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     <div class="api-state" id="api-state" title="点击配置 API">
       <i></i><span id="api-state-text">AI 未配置</span>
     </div>
+    <button class="icon-btn" id="btn-export-history" type="button" title="历史导出记录" aria-label="历史导出记录">
+      <svg class="icon"><use href="#i-history"/></svg>
+    </button>
     <button class="icon-btn" id="btn-app-settings" type="button" title="设置" aria-label="设置">
       <svg class="icon"><use href="#i-settings"/></svg>
     </button>
@@ -1239,6 +1256,14 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
         </div>
       </div>
 
+      <div class="settings-block" style="margin-top:10px">
+        <div class="field">
+          <label>历史导出记录</label>
+          <p class="help">只记录当前设备浏览器里的导出；换设备或清缓存不会同步。</p>
+          <button class="btn small" id="btn-open-export-history" type="button" style="margin-top:7px">打开本机历史</button>
+        </div>
+      </div>
+
       <div class="note-box danger" style="margin-top:12px">
         <b>安全提示：</b>纯前端页面的 Key 对任何能打开此页面的人都可见。公开部署时请开启「代理模式」，由你的后端注入密钥；不要在源码或公开仓库中内置真实 Key。
       </div>
@@ -1311,6 +1336,28 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
 </div>
 
 <!-- ================= AI 批量补全 ================= -->
+<div class="modal-layer drawer-right" id="modal-export-history" role="dialog" aria-modal="true" aria-labelledby="history-title">
+  <div class="modal narrow">
+    <div class="modal-head">
+      <div>
+        <h3 class="modal-title" id="history-title">历史导出</h3>
+        <div class="modal-sub" id="export-history-count">0 条 · 仅本机</div>
+      </div>
+      <button class="modal-close" type="button" data-close="modal-export-history" aria-label="关闭"><svg class="icon" style="width:15px;height:15px"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="note-box" style="margin-bottom:12px">
+        这些记录只保存在当前设备的浏览器 IndexedDB 里，不会上传、不会跨设备同步。删除浏览器数据或换浏览器后就看不到了。
+      </div>
+      <div id="export-history-list"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn small ghost" id="btn-clear-export-history" type="button">清空记录</button>
+      <button class="btn small" type="button" data-close="modal-export-history">关闭</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-layer drawer-right" id="modal-batch-ai" role="dialog" aria-modal="true" aria-labelledby="batch-title">
   <div class="modal narrow">
     <div class="modal-head">
@@ -2847,6 +2894,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     const layer = document.getElementById(id);
     if (!layer) return;
     layer.classList.remove('open');
+    if (id === 'modal-export-history') state.ui.exportHistoryOpen = false;
     if (state.ui.modal === id) state.ui.modal = null;
     if (!document.querySelector('.modal-layer.open') && !$('#assistant').classList.contains('open') && !state.review.open) {
       document.body.style.overflow = '';
@@ -6006,7 +6054,142 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     toast('已恢复浏览器下载目录。', 'success');
   }
 
-  async function downloadBlob(filename, blob) {
+  const HISTORY_DB = 'framecut.exports.v1';
+  let historyDBPromise = null;
+  function openHistoryDB() {
+    if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB unavailable'));
+    if (historyDBPromise) return historyDBPromise;
+    historyDBPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(HISTORY_DB, 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains('exports')) req.result.createObjectStore('exports', { keyPath: 'id' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return historyDBPromise;
+  }
+  function exportTypeOf(filename) {
+    const ext = String(filename).split('.').pop().toLowerCase();
+    return ({ md: 'MD', zip: 'ZIP', json: 'JSON', pdf: 'PDF', html: 'HTML', png: 'PNG', jpg: 'JPG', jpeg: 'JPG', webp: 'WebP' })[ext] || ext.toUpperCase() || 'FILE';
+  }
+  async function trimExportHistory(db) {
+    const all = await new Promise((resolve, reject) => {
+      const req = db.transaction('exports', 'readonly').objectStore('exports').getAll();
+      req.onsuccess = () => resolve(req.result || []); req.onerror = () => reject(req.error);
+    });
+    if (all.length <= 100) return;
+    all.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    for (const h of all.slice(100)) {
+      await new Promise((resolve) => {
+        const tx = db.transaction('exports', 'readwrite');
+        tx.objectStore('exports').delete(h.id);
+        tx.oncomplete = resolve; tx.onerror = resolve;
+      });
+    }
+  }
+  async function recordExport(data) {
+    try {
+      const db = await openHistoryDB();
+      const blob = data.blob && data.blob.size <= 12 * 1024 * 1024 ? data.blob : null;
+      const item = {
+        id: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
+        filename: data.filename,
+        type: data.type || exportTypeOf(data.filename),
+        mime: data.mime || blob?.type || '',
+        size: Number(data.size || blob?.size || 0),
+        destination: data.destination || 'download',
+        dirName: data.dirName || '',
+        projectId: state.project?.id || '',
+        projectTitle: state.project?.title || '未命名项目',
+        createdAt: new Date().toISOString(),
+        blob
+      };
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('exports', 'readwrite');
+        tx.objectStore('exports').put(item);
+        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+      });
+      await trimExportHistory(db);
+      if (state.ui?.exportHistoryOpen) renderExportHistory();
+      return item;
+    } catch (e) {
+      console.warn('record export history failed', e);
+      return null;
+    }
+  }
+  async function listExportHistory() {
+    try {
+      const db = await openHistoryDB();
+      const all = await new Promise((resolve, reject) => {
+        const req = db.transaction('exports', 'readonly').objectStore('exports').getAll();
+        req.onsuccess = () => resolve(req.result || []); req.onerror = () => reject(req.error);
+      });
+      return all.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    } catch (e) { console.warn('list export history failed', e); return []; }
+  }
+  async function deleteExportHistory(id) {
+    try {
+      const db = await openHistoryDB();
+      await new Promise((resolve) => {
+        const tx = db.transaction('exports', 'readwrite');
+        tx.objectStore('exports').delete(id);
+        tx.oncomplete = resolve; tx.onerror = resolve;
+      });
+      renderExportHistory();
+    } catch (e) { console.warn('delete export history failed', e); }
+  }
+  async function clearExportHistory() {
+    const ok = await askConfirm('清空本机导出记录', '只会删除当前设备浏览器里的历史记录，不会删除已经导出的文件。', '清空记录');
+    if (!ok) return;
+    try {
+      const db = await openHistoryDB();
+      await new Promise((resolve) => {
+        const tx = db.transaction('exports', 'readwrite');
+        tx.objectStore('exports').clear();
+        tx.oncomplete = resolve; tx.onerror = resolve;
+      });
+      renderExportHistory();
+      toast('本机导出记录已清空。', 'success');
+    } catch (e) { toast('清空失败：' + (e.message || e), 'error'); }
+  }
+  async function renderExportHistory() {
+    const list = $('#export-history-list');
+    if (!list) return;
+    const items = await listExportHistory();
+    const count = $('#export-history-count');
+    if (count) count.textContent = `${items.length} 条 · 仅本机`;
+    if (!items.length) {
+      list.innerHTML = '<div class="history-empty"><b>还没有导出记录</b><span>从本机导出的 Markdown、ZIP、JSON、PDF 会出现在这里。</span></div>';
+      return;
+    }
+    list.innerHTML = items.map((h) => `
+      <div class="history-item">
+        <div class="history-icon">${mdCell(h.type || 'FILE')}</div>
+        <div class="history-main">
+          <b title="${esc(h.filename)}">${esc(h.filename)}</b>
+          <span>${esc(h.projectTitle || '未命名项目')} · ${esc(h.destination === 'folder' ? (h.dirName || '所选文件夹') : h.destination === 'print' ? '打印窗口' : '浏览器下载')}</span>
+          <small>${esc(new Date(h.createdAt).toLocaleString('zh-CN'))} · ${h.size ? fmtBytes(h.size) : '未记录大小'}</small>
+        </div>
+        <div class="history-actions">
+          ${h.blob ? `<button class="link-btn" data-history-download="${esc(h.id)}">下载副本</button>` : ''}
+          <button class="link-btn" data-history-delete="${esc(h.id)}">删除</button>
+        </div>
+      </div>`).join('');
+  }
+  async function redownloadHistory(id) {
+    const items = await listExportHistory();
+    const h = items.find((x) => x.id === id);
+    if (!h?.blob) { toast('这条记录只保留了信息，没有保存文件副本。', 'warn'); return; }
+    await downloadBlob(h.filename, h.blob, false);
+  }
+  async function openExportHistory() {
+    state.ui.exportHistoryOpen = true;
+    openModal('modal-export-history');
+    await renderExportHistory();
+  }
+  async function downloadBlob(filename, blob, record = true) {
+    let destination = state.exportDir ? 'folder' : 'download';
     if (state.exportDir) {
       try {
         const fh = await state.exportDir.getFileHandle(filename, { create: true });
@@ -6014,9 +6197,11 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
         await w.write(blob);
         await w.close();
         toast(`已保存到 ${state.exportDirName}/${filename}`, 'success', 3500);
+        if (record) await recordExport({ filename, blob, destination: 'folder', dirName: state.exportDirName });
         return;
       } catch (e) {
         console.warn('write export dir failed, fallback download', e);
+        destination = 'download';
         toast('写入所选文件夹失败，已回退到浏览器下载。', 'warn', 4000);
       }
     }
@@ -6025,6 +6210,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 30000);
+    if (record) await recordExport({ filename, blob, destination });
   }
 
   function downloadText(filename, content, mime) {
@@ -6451,6 +6637,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       await sleep(350);
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
+      recordExport({ filename: safeFileName(state.project.title, 'pdf'), type: 'PDF', destination: 'print', size: 0 });
       toast('打印窗口已打开：目标选择「另存为 PDF」，勾选背景图形。', 'success', 6500);
       setTimeout(() => { try { iframe.remove(); } catch (e) { /* noop */ } }, 60000);
     } catch (e) {
@@ -7243,6 +7430,15 @@ ${shots}`;
     $('#api-state').addEventListener('click', openSettings);
     $('#btn-app-settings').addEventListener('click', openSettings);
     $('#btn-assistant-settings').addEventListener('click', openSettings);
+    $('#btn-export-history').addEventListener('click', openExportHistory);
+    $('#btn-open-export-history').addEventListener('click', () => { closeModal('modal-settings'); openExportHistory(); });
+    $('#btn-clear-export-history').addEventListener('click', clearExportHistory);
+    $('#export-history-list').addEventListener('click', (e) => {
+      const dl = e.target.closest('[data-history-download]');
+      if (dl) { redownloadHistory(dl.dataset.historyDownload); return; }
+      const del = e.target.closest('[data-history-delete]');
+      if (del) deleteExportHistory(del.dataset.historyDelete);
+    });
     $('#api-provider').addEventListener('change', applyProviderPreset);
     $('#btn-choose-export-dir').addEventListener('click', chooseExportDir);
     $('#btn-clear-export-dir').addEventListener('click', clearExportDir);
