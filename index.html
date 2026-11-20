@@ -4623,7 +4623,7 @@ ${lines || '（无台词）'}`;
     for (const shot of shots) {
       if (!group.length) { group.push(shot); continue; }
       const prev = group[group.length - 1];
-      const tooLong = shot.end - group[0].start > 120;
+      const tooLong = shot.end - group[0].start > 180;
       if (tooLong || !sameScene(prev, shot)) { flush(); group.push(shot); }
       else group.push(shot);
     }
@@ -4882,10 +4882,9 @@ ${lines || '（无台词）'}`;
       p.shots = groupShotsIntoScenes(p.shots);
       p.sceneGrouped = true;
       p.sceneCount = p.shots.length;
-      p.shots = splitScenesByDialogue(p.shots);
       p.hardShotCount = hardShotCount;
       p.shotCount = p.shots.length;
-      p.dialogueSplit = p.shots.length > p.sceneCount;
+      p.dialogueSplit = false;
       applyAutoQC(p.shots);
       p.segmentSource = 'compose-auto';
       state.ui.visibleCount = p.shots.length;
@@ -5564,10 +5563,9 @@ ${lines || '（无台词）'}`;
         state.project.shots = groupShotsIntoScenes(state.project.shots);
         state.project.sceneGrouped = true;
         state.project.sceneCount = state.project.shots.length;
-        state.project.shots = splitScenesByDialogue(state.project.shots);
         state.project.hardShotCount = hardShotCount;
         state.project.shotCount = state.project.shots.length;
-        state.project.dialogueSplit = state.project.shots.length > state.project.sceneCount;
+        state.project.dialogueSplit = false;
         if ($('#batch-auto-qc')?.checked) applyAutoQC(state.project.shots);
       }
       renderAll();
@@ -6145,66 +6143,75 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       const chars = (shot.characters || []).filter((c) => c && c.name);
       const dLines = (shot.dialogueLines || []).filter((d) => d && d.text);
       const title = firstSentence(shot.description);
-      push(`### ⏱️ [${fmtTime(shot.start)} - ${fmtTime(shot.end)}] #${String(shot.index).padStart(3, '0')} · ${title}`);
+      push(`### ⏱️ [${fmtTime(shot.start)} - ${fmtTime(shot.end)}] ${title}`);
       push('');
       push(`> **场景描述**：${shot.description || '待补全。'}`);
-      if (shot.scene) push(`> **场景段**：由 ${shot.sceneShotCount || 1} 个硬切镜头组成（${(shot.subShots || []).map((s) => `#${String(s.index).padStart(3, '0')} ${fmtTime(s.start)}–${fmtTime(s.end)}`).join('；')}）。`);
       push(`> **构图**：${shot.shotSize || '中景'} / ${shot.angle || '平视'} / ${shot.camera || '固定'}。**光线**：${shot.lighting || '自然光'}。**环境**：${shot.environment || '当前场景'}。`);
       push('');
-      if (shot.thumb && imageMode !== 'none') {
-        const file = `frames/${String(shot.index).padStart(3, '0')}.jpg`;
-        push(imageMode === 'folder' ? `![分镜 ${shot.index}](${file})` : `<img src="${shot.thumb}" width="180" alt="分镜 ${shot.index}">`);
-        push('');
-      }
       push(`**人物**：${chars.length ? chars.map((c) => `【${c.name}】${c.appearance || ''}${c.wardrobe ? '（' + c.wardrobe + '）' : ''}`).join('；') : '画面无可见人物 / 待补'}`);
       push('');
-      const subtitleParts = shot.dialogue ? String(shot.dialogue).split(/\s*\/\s*|\n+/).map((s) => s.trim()).filter(Boolean) : [];
-      const dialogueRows = subtitleParts.length > dLines.length
+      const subtitleParts = shot.dialogue ? String(shot.dialogue).split(/\s*\/\s*|\n+/).map((x) => x.trim()).filter(Boolean) : [];
+      const lineRows = subtitleParts.length > dLines.length
         ? subtitleParts.map((text) => {
             const hit = dLines.find((d) => d.text && (d.text.includes(text) || text.includes(d.text)));
             let speaker = hit?.speaker || (chars.length === 1 ? chars[0].name : '');
-            if (!speaker || /^(未知|不明|—|-)$/.test(speaker)) speaker = chars.length === 1 ? chars[0].name : '画外音';
-            return { speaker, text, tone: hit?.tone || shot.emotion || '' };
+            if (!speaker || /^(未知|不明|画外音|手机画外音|电视画外音|—|-)$/.test(speaker)) {
+              speaker = inferDialogueSpeaker(text, chars.map((c) => c.name), shot.description);
+            }
+            return { speaker, text, tone: hit?.tone || shot.emotion || '', start: hit?.start, end: hit?.end };
           })
         : dLines;
-      if (dialogueRows.length) {
-        for (const d of dialogueRows) {
-          push(`**【${d.speaker || '画外音'}】**（语气：${d.tone || shot.emotion || '自然'}）`);
+      for (const d of lineRows) {
+        if (!d.speaker || /^(未知|不明|画外音|手机画外音|电视画外音|—|-)$/.test(d.speaker)) {
+          d.speaker = inferDialogueSpeaker(d.text, chars.map((c) => c.name), shot.description);
+        }
+      }
+      if (lineRows.length) {
+        lineRows.forEach((d, idx) => {
+          const speaker = d.speaker || '画外音';
+          const char = chars.find((c) => c.name === speaker) || chars[0] || null;
+          const cp = (p.castProfiles || {})[speaker] || {};
+          const tone = d.tone || shot.emotion || '自然';
+          const lineStart = Number.isFinite(d.start) ? d.start : shot.start + (shot.end - shot.start) * idx / lineRows.length;
+          const lineEnd = Number.isFinite(d.end) ? d.end : shot.start + (shot.end - shot.start) * (idx + 1) / lineRows.length;
+          const arcs = (shot.expressionArc || []).filter((e) => {
+            if (!e.expression) return false;
+            const t = parseFloat(String(e.time || '').replace(/[^\d.]/g, ''));
+            return !Number.isFinite(t) || (t >= lineStart - .2 && t <= lineEnd + .2);
+          });
+          push(`**【${speaker}】**（${char?.action ? `动作：${char.action}；` : ''}语气：${tone}）`);
           push(`"${d.text}"`);
           push('');
-        }
-      } else if (shot.dialogue) {
-        const parts = String(shot.dialogue).split(/\s*\/\s*|\n+/).map((s) => s.trim()).filter(Boolean);
-        for (const text of parts) {
-          push(`**【${chars[0]?.name || '画外音'}】**（语气：${shot.emotion || '自然'}）`);
-          push(`"${text}"`);
+          const voice = [cp.voice, cp.speech, cp.breath].filter(Boolean).join('；') || '自然口语';
+          push(`- **🎙️ 声音质感**：${voice}；${tone}`);
+          push('- **😐 表情变化轨迹**：');
+          if (arcs.length) {
+            for (const e of arcs) push(`    * \`[${e.time || '—'}]\` ${e.expression}`);
+          } else if (char?.expression) {
+            push(`    * ${char.expression}`);
+          } else {
+            push('    * 表情随台词与对手反应推进');
+          }
+          const action = char?.action || shot.description || '动作随台词推进';
+          push(`- **👀 眼神交互**：${/(看|视|盯|望|目光|眼)/.test(action) ? action : '视线随对话对象与画面焦点移动'}`);
+          push(`- **🙌 动作细节**：${action}`);
+          push(`- **🫧 神态气场**：${[char?.expression, shot.emotion].filter(Boolean).join('；') || '自然交流'}`);
           push('');
-        }
+        });
       } else {
         push('**台词**：无台词 / 字幕。');
         push('');
+        const voice = (p.castProfiles || {})[chars[0]?.name]?.voice || '环境声与呼吸声为主';
+        push(`- **🎙️ 声音质感**：${voice}`);
+        push('- **😐 表情变化轨迹**：');
+        const arcs = (shot.expressionArc || []).filter((e) => e.expression);
+        if (arcs.length) for (const e of arcs) push(`    * \`[${e.time || '—'}]\` ${e.expression}`);
+        else push('    * 表情随场景推进，保持自然');
+        push('- **👀 眼神交互**：视线随场景焦点移动');
+        push(`- **🙌 动作细节**：${shot.description || '动作随场景推进'}`);
+        push(`- **🫧 神态气场**：${shot.emotion || '自然交流'}`);
+        push('');
       }
-
-      const actions = chars.map((c) => c.action).filter(Boolean);
-      const looks = actions.filter((a) => /看|视|盯|望|目光|眼/.test(a));
-      const tones = dialogueRows.map((d) => d.tone).filter(Boolean);
-      const expressions = chars.map((c) => c.expression).filter(Boolean);
-      const arcs = (shot.expressionArc || []).filter((e) => e.expression);
-      push(`- **🎙️ 声音质感**：${mdCell(uniqJoin([...tones, shot.emotion], '；') || (shot.dialogue ? '自然口语、节奏随对话推进' : '环境声与呼吸声为主'))}`);
-      push('- **😐 表情变化轨迹**：');
-      if (arcs.length) {
-        for (const e of arcs) push(`    * \`[${e.time || '—'}]\` ${e.expression}`);
-      } else if (expressions.length) {
-        for (const e of expressions.slice(0, 4)) push(`    * ${e}`);
-      } else {
-        push('    * 表情随对话与场景推进，保持自然');
-      }
-      push(`- **👀 眼神交互**：${mdCell(uniqJoin(looks, '；') || '视线随对话对象与画面焦点移动')}`);
-      push(`- **🙌 动作细节**：${mdCell(uniqJoin(actions, '；') || shot.description || '动作随对话推进')}`);
-      push(`- **🫧 神态气场**：${mdCell(uniqJoin([...expressions, shot.emotion], '；') || '自然交流')}`);
-      push('');
-      push(`> **画面**：${shot.thumb ? (imageMode === 'none' ? '帧图未导出（纯文字版）' : '见上方帧图') : '无帧'}；分镜 ${shot.index} / ${p.shots.length}。`);
-      push('');
       push('---');
       push('');
     }
