@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="color-scheme" content="dark light" />
 <meta name="description" content="FrameCut 拆镜台：浏览器内视频抽帧、快拆/精拆、分镜质检、Markdown / PDF 交付与 AI 导演助手。" />
-<title>FrameCut 拆镜台 · 视频分镜工作台</title>
-<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<title>白夜行 · 拆镜台</title>
+<link rel="icon" href="favicon.png" type="image/png" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#090a0c" />
@@ -75,8 +75,8 @@ a{color:inherit}
 /* 顶栏 */
 .topbar{position:relative;z-index:40;height:66px;display:flex;align-items:center;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--bg) 86%,transparent);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
 .brand{width:340px;flex:none;display:flex;align-items:center;gap:12px;padding:0 22px;height:100%;border-right:1px solid var(--line)}
-.brand-mark{width:34px;height:34px;border-radius:9px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font:800 13px/1 var(--font-mono);letter-spacing:-1px;position:relative;overflow:hidden;flex:none}
-.brand-mark::after{content:"";position:absolute;width:1px;height:22px;background:var(--accent-ink);transform:rotate(24deg);opacity:.5}
+.brand-mark{width:34px;height:34px;border-radius:9px;background:transparent;display:grid;place-items:center;position:relative;overflow:hidden;flex:none;border:1px solid var(--line)}
+.brand-mark img{width:100%;height:100%;object-fit:cover;display:block}
 .brand-name{font-size:14px;font-weight:700;letter-spacing:.12em;line-height:1.2}
 .brand-sub{font-size:10px;color:var(--muted);letter-spacing:.16em;text-transform:uppercase;margin-top:2px}
 .top-main{flex:1;min-width:0;display:flex;align-items:center;gap:16px;padding:0 22px}
@@ -593,9 +593,9 @@ h1.project-title button:hover{background:var(--panel-3)}
 
 <header class="topbar">
   <div class="brand">
-    <div class="brand-mark">FC</div>
+    <div class="brand-mark"><img src="logo.jpg" alt="白夜行" /></div>
     <div>
-      <div class="brand-name">FRAMECUT</div>
+      <div class="brand-name">白夜行</div>
       <div class="brand-sub">拆镜台 / storyboard desk</div>
     </div>
   </div>
@@ -608,6 +608,9 @@ h1.project-title button:hover{background:var(--panel-3)}
     <div class="api-state" id="api-state" title="点击配置 API">
       <i></i><span id="api-state-text">AI 未配置</span>
     </div>
+    <button class="icon-btn" id="btn-app-settings" type="button" title="设置" aria-label="设置">
+      <svg class="icon"><use href="#i-settings"/></svg>
+    </button>
     <button class="btn ghost small" id="btn-method" type="button" title="查看拆解方法论">
       <svg class="icon"><use href="#i-layers"/></svg><span>方法论</span>
     </button>
@@ -958,7 +961,7 @@ h1.project-title button:hover{background:var(--panel-3)}
 </aside>
 
 <!-- ================= API 配置 ================= -->
-<div class="modal-layer" id="modal-settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+<div class="modal-layer drawer-right" id="modal-settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
   <div class="modal narrow">
     <div class="modal-head">
       <div>
@@ -969,6 +972,17 @@ h1.project-title button:hover{background:var(--panel-3)}
     </div>
     <div class="modal-body">
       <div class="settings-block">
+        <div class="field">
+          <label for="api-provider">接口预设（任意 OpenAI 兼容均可）</label>
+          <select class="select" id="api-provider">
+            <option value="deepseek">DeepSeek 官方</option>
+            <option value="openai">OpenAI 兼容</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="siliconflow">硅基流动</option>
+            <option value="custom">自定义接口</option>
+          </select>
+          <p class="help">只要提供 Base URL + Key + 模型名，任何兼容 <code>/chat/completions</code> 的接口都能接入。</p>
+        </div>
         <div class="field">
           <label for="api-base">BASE URL</label>
           <input class="input" id="api-base" type="url" spellcheck="false" placeholder="https://api.deepseek.com/v1" />
@@ -1000,6 +1014,18 @@ h1.project-title button:hover{background:var(--panel-3)}
             </button>
           </div>
           <p class="help" id="key-help">Key 只保存在本机 localStorage，本页不会主动上传。默认不内置任何 Key；请填入你自己的 Key，或开启下方「代理模式」。</p>
+        </div>
+      </div>
+
+      <div class="settings-block" style="margin-top:12px">
+        <div class="field">
+          <label>导出文件存储位置</label>
+          <p class="help" id="export-dir-name">默认：浏览器下载目录</p>
+          <div class="inline-row" style="margin-top:7px">
+            <button class="btn small" id="btn-choose-export-dir" type="button">选择文件夹</button>
+            <button class="btn small ghost" id="btn-clear-export-dir" type="button">恢复默认</button>
+          </div>
+          <p class="help">支持 File System Access 的浏览器会直接写入所选文件夹；不支持时回退到浏览器下载。</p>
         </div>
       </div>
 
@@ -1620,6 +1646,8 @@ h1.project-title button:hover{background:var(--panel-3)}
       visibleCount: PAGE_SIZE
     },
     chat: { messages: [], controller: null, streaming: false },
+    exportDir: null,
+    exportDirName: '',
     batchAI: { running: false, cancel: false, controller: null, done: 0, total: 0, failed: 0 },
     review: { open: false, list: [], index: 0 }
   };
@@ -5694,7 +5722,94 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     return `${base}_高精度脚本还原_${new Date().toISOString().slice(0, 10)}.${ext}`;
   }
 
-  function downloadBlob(filename, blob) {
+  const PREFS_DB = 'framecut.prefs.v1';
+  let prefsDBPromise = null;
+  function openPrefsDB() {
+    if (!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB unavailable'));
+    if (prefsDBPromise) return prefsDBPromise;
+    prefsDBPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(PREFS_DB, 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains('prefs')) req.result.createObjectStore('prefs');
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return prefsDBPromise;
+  }
+  async function saveExportDirHandle(handle) {
+    try {
+      const db = await openPrefsDB();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction('prefs', 'readwrite');
+        tx.objectStore('prefs').put(handle || null, 'exportDir');
+        tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) { console.warn('save export dir failed', e); }
+  }
+  async function loadExportDirHandle() {
+    try {
+      const db = await openPrefsDB();
+      const handle = await new Promise((resolve, reject) => {
+        const req = db.transaction('prefs', 'readonly').objectStore('prefs').get('exportDir');
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+      if (handle) {
+        const perm = await handle.queryPermission?.({ mode: 'readwrite' });
+        if (perm === 'granted' || !handle.queryPermission) {
+          state.exportDir = handle;
+          state.exportDirName = handle.name || '';
+        }
+      }
+    } catch (e) { console.warn('load export dir failed', e); }
+    renderExportDir();
+  }
+  function renderExportDir() {
+    const el = $('#export-dir-name');
+    if (!el) return;
+    el.textContent = state.exportDir ? `当前：${state.exportDirName || state.exportDir.name}（直接写入）` : '默认：浏览器下载目录';
+  }
+  async function chooseExportDir() {
+    if (!window.showDirectoryPicker) {
+      toast('当前浏览器不支持文件夹选择，将使用浏览器下载目录。', 'warn', 5000);
+      return;
+    }
+    try {
+      const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
+      const perm = await handle.requestPermission?.({ mode: 'readwrite' });
+      if (perm && perm !== 'granted') throw new Error('未获得文件夹写入权限');
+      state.exportDir = handle;
+      state.exportDirName = handle.name || '';
+      await saveExportDirHandle(handle);
+      renderExportDir();
+      toast(`导出位置已设为：${state.exportDirName}`, 'success');
+    } catch (e) {
+      if (e?.name !== 'AbortError') toast(`选择文件夹失败：${e.message || e}`, 'error');
+    }
+  }
+  async function clearExportDir() {
+    state.exportDir = null;
+    state.exportDirName = '';
+    await saveExportDirHandle(null);
+    renderExportDir();
+    toast('已恢复浏览器下载目录。', 'success');
+  }
+
+  async function downloadBlob(filename, blob) {
+    if (state.exportDir) {
+      try {
+        const fh = await state.exportDir.getFileHandle(filename, { create: true });
+        const w = await fh.createWritable();
+        await w.write(blob);
+        await w.close();
+        toast(`已保存到 ${state.exportDirName}/${filename}`, 'success', 3500);
+        return;
+      } catch (e) {
+        console.warn('write export dir failed, fallback download', e);
+        toast('写入所选文件夹失败，已回退到浏览器下载。', 'warn', 4000);
+      }
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = filename;
@@ -6235,6 +6350,22 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     }
   }
 
+  function applyProviderPreset() {
+    const p = $('#api-provider')?.value || 'custom';
+    const presets = {
+      deepseek: ['https://api.deepseek.com/v1', 'deepseek-flash', 'deepseek-v4-pro'],
+      openai: ['https://api.openai.com/v1', 'gpt-4o', 'gpt-4o-mini'],
+      openrouter: ['https://openrouter.ai/api/v1', 'openai/gpt-4o', 'openai/gpt-4o-mini'],
+      siliconflow: ['https://api.siliconflow.cn/v1', 'Qwen/Qwen2.5-VL-72B-Instruct', 'Qwen/Qwen2.5-72B-Instruct']
+    };
+    const v = presets[p];
+    if (!v) return;
+    $('#api-base').value = v[0];
+    $('#api-vision-model').value = v[1];
+    $('#api-text-model').value = v[2];
+    syncSettingsFromForm();
+  }
+
   function openSettings() {
     $('#api-base').value = state.settings.baseUrl || '';
     $('#api-vision-model').value = state.settings.visionModel || '';
@@ -6248,6 +6379,10 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     $('#ali-key').value = state.settings.aliKey || '';
     $('#ali-file-url').value = state.settings.aliFileUrl || '';
     $('#opt-proxy').checked = !!state.settings.proxyMode;
+    const base = state.settings.baseUrl || '';
+    const provider = /deepseek\.com/i.test(base) ? 'deepseek' : /openai\.com/i.test(base) ? 'openai' : /openrouter/i.test(base) ? 'openrouter' : /siliconflow/i.test(base) ? 'siliconflow' : 'custom';
+    $('#api-provider').value = provider;
+    renderExportDir();
     $('#test-api-result').textContent = '';
     $('#test-api-result').className = 'help';
     $('#test-vision-result').textContent = '';
@@ -6896,7 +7031,12 @@ ${shots}`;
 
     // API / 设置
     $('#api-state').addEventListener('click', openSettings);
+    $('#btn-app-settings').addEventListener('click', openSettings);
     $('#btn-assistant-settings').addEventListener('click', openSettings);
+    $('#api-provider').addEventListener('change', applyProviderPreset);
+    $('#btn-choose-export-dir').addEventListener('click', chooseExportDir);
+    $('#btn-clear-export-dir').addEventListener('click', clearExportDir);
+    loadExportDirHandle();
     ['#api-base', '#api-vision-model', '#api-text-model', '#api-key', '#deepgram-key', '#ali-key', '#ali-file-url'].forEach((sel) => {
       $(sel).addEventListener('input', syncSettingsFromForm);
     });
