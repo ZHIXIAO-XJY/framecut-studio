@@ -762,9 +762,7 @@ h1.project-title button:hover{background:var(--panel-3)}
         <div class="qc-row"><span>视觉模型</span><b id="side-ai-model">deepseek-flash</b></div>
         <div class="qc-row"><span>待补全</span><b id="side-ai-candidates">0</b></div>
       </div>
-      <button class="btn wide" id="btn-side-batch" type="button" style="margin-top:9px">
-        <svg class="icon"><use href="#i-settings"/></svg>AI 参数 / 手动补全
-      </button>
+      <div class="note-box" style="margin-top:9px"><b>已改为自动补全：</b>点「分镜头合成」后会自动完成台词转写、角色归一、画面补全、质检和去重合并，不需要手动点 AI。</div>
       <div class="inline-row" style="margin-top:8px;justify-content:space-between">
         <button class="link-btn" id="btn-side-ai-settings" type="button">连接设置</button>
         <span class="side-meta" id="side-ai-note">先质检，再补全</span>
@@ -803,7 +801,7 @@ h1.project-title button:hover{background:var(--panel-3)}
           <button class="btn small" id="btn-review" type="button">
             <svg class="icon"><use href="#i-play"/></svg>逐帧复核
           </button>
-          <button class="btn small" id="btn-batch-ai" type="button">
+          <button class="btn small" id="btn-batch-ai" type="button" hidden>
             <svg class="icon"><use href="#i-sparkles"/></svg>AI 补全
           </button>
           <button class="btn small" id="btn-global-qc" type="button">
@@ -1024,6 +1022,10 @@ h1.project-title button:hover{background:var(--panel-3)}
         <div class="toggle-row">
           <div><span>关闭推理（推荐）</span><small>DeepSeek V4.x 默认先输出 reasoning，JSON 提取可能 content 为空；关掉更稳</small></div>
           <label class="switch"><input type="checkbox" id="opt-reasoning-off" checked /><i></i></label>
+        </div>
+        <div class="toggle-row">
+          <div><span>音频台词优先（DeepSeek ASR）</span><small>用视频音轨转写台词，官方 /v1/tools/asr；不额外配语音 Key</small></div>
+          <label class="switch"><input type="checkbox" id="opt-asr" checked /><i></i></label>
         </div>
         <div class="toggle-row">
           <div><span>代理模式</span><small>Base URL 指向自己的代理，由服务端注入 Key；本页不发送 Authorization</small></div>
@@ -1479,6 +1481,7 @@ h1.project-title button:hover{background:var(--panel-3)}
     visionModel: 'deepseek-flash',
     textModel: 'deepseek-v4-pro',
     reasoningOff: true,
+    asr: true,
     stream: true,
     context: true,
     proxyMode: false,
@@ -3580,13 +3583,137 @@ h1.project-title button:hover{background:var(--panel-3)}
     return list;
   }
 
+  async function decodeVideoAudio(file) {
+    if (!file) throw new Error('原始视频不在内存中，无法读取音轨');
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) throw new Error('当前浏览器不支持音频解码');
+    const ctx = new Ctx();
+    try {
+      const data = await file.arrayBuffer();
+      const audio = await ctx.decodeAudioData(data.slice(0));
+      return audio;
+    } finally {
+      ctx.close().catch(() => {});
+    }
+  }
+
+  function audioBufferToWav(buffer, sampleRate = 16000) {
+    const ch = buffer.getChannelData(0);
+    const len = ch.length;
+    const ab = new ArrayBuffer(44 + len * 2);
+    const dv = new DataView(ab);
+    const write = (off, str) => { for (let i = 0; i < str.length; i++) dv.setUint8(off + i, str.charCodeAt(i)); };
+    write(0, 'RIFF'); dv.setUint32(4, 36 + len * 2, true); write(8, 'WAVE');
+    write(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+    dv.setUint32(24, sampleRate, true); dv.setUint32(28, sampleRate * 2, true);
+    dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+    write(36, 'data'); dv.setUint32(40, len * 2, true);
+    let off = 44;
+    for (let i = 0; i < len; i++, off += 2) {
+      const s = Math.max(-1, Math.min(1, ch[i]));
+      dv.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    return new Blob([ab], { type: 'audio/wav' });
+  }
+
+  async function sliceShotAudio(audio, start, end) {
+    const sr = 16000;
+    const from = Math.max(0, Math.min(audio.duration, start));
+    const to = Math.max(from + .05, Math.min(audio.duration, end));
+    const dur = Math.min(119.5, to - from);
+    if (dur <= .05) return null;
+    const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const ctx = new Offline(1, Math.ceil(dur * sr), sr);
+    const src = ctx.createBufferSource();
+    src.buffer = audio;
+    src.connect(ctx.destination);
+    src.start(0, from, dur);
+    const rendered = await ctx.startRendering();
+    return audioBufferToWav(rendered, sr);
+  }
+
+  async function transcribeAudioBlob(blob) {
+    const fd = new FormData();
+    fd.append('file', blob, 'framecut-shot.wav');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60000);
+    let res;
+    try {
+      res = await fetch(asrURL(), { method: 'POST', headers: asrHeaders(), body: fd, signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res.ok) throw await apiError(res);
+    const data = await res.json();
+    return String(data.text || '').trim();
+  }
+
+  function splitDialogueUnits(text) {
+    const raw = String(text || '').replace(/\r/g, '\n').trim();
+    if (!raw) return [];
+    let parts = raw.split(/(?<=[。！？!?；;])|\n+/).map((s) => s.trim()).filter(Boolean);
+    if (parts.length < 2 && raw.length > 24) {
+      parts = raw.split(/[，,、]/).map((s) => s.trim()).filter(Boolean);
+    }
+    return parts;
+  }
+
+  function assignUnitsToShots(units, chunkShots) {
+    if (!units.length || !chunkShots.length) return 0;
+    const total = chunkShots.reduce((s, x) => s + Math.max(.1, x.end - x.start), 0);
+    let assigned = 0;
+    for (let i = 0; i < units.length; i++) {
+      const target = ((i + 1) / units.length) * total;
+      let acc = 0;
+      let shot = chunkShots[chunkShots.length - 1];
+      for (const s of chunkShots) {
+        acc += Math.max(.1, s.end - s.start);
+        if (target <= acc) { shot = s; break; }
+      }
+      const existing = String(shot.dialogue || '').split(/\s*\/\s*/).map((x) => x.trim()).filter(Boolean);
+      shot.dialogue = mergeDialogueTexts([...existing, units[i]]).join(' / ');
+      shot.dialogueSource = 'asr';
+      assigned++;
+    }
+    return assigned;
+  }
+
+  async function transcribeShotsAudio(shots, onProgress) {
+    const audio = await decodeVideoAudio(state.video.file);
+    const chunkSec = 110;
+    const chunks = [];
+    for (let t = 0; t < audio.duration - .05; t += chunkSec) {
+      chunks.push({ start: t, end: Math.min(audio.duration, t + chunkSec) });
+    }
+    let ok = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      if (state.ui.composeStop) break;
+      try {
+        const wav = await sliceShotAudio(audio, chunks[i].start, chunks[i].end);
+        if (wav) {
+          const text = await transcribeAudioBlob(wav);
+          if (text) {
+            const units = splitDialogueUnits(text);
+            const chunkShots = shots.filter((s) => s.start < chunks[i].end - .01 && s.end > chunks[i].start + .01);
+            ok += assignUnitsToShots(units, chunkShots);
+          }
+        }
+      } catch (e) {
+        console.warn('ASR chunk failed', chunks[i].start, e);
+      }
+      onProgress?.(i + 1, chunks.length, ok);
+      await sleep(150);
+    }
+    return { calls: chunks.length, ok };
+  }
+
   function reconcileDialogue(shots, frames, subs) {
     const entries = [];
     if (subs?.length) {
       for (const s of subs) {
         if (s.text) entries.push({ t: s.start, text: s.text, source: 'subtitle' });
       }
-    } else if (frames?.length) {
+    } else if (frames?.some((f) => String(f.dialogue || '').trim())) {
       for (const f of frames) {
         const parts = String(f.dialogue || '').split(/\s*\/\s*/).map((x) => x.trim()).filter(Boolean);
         for (const text of parts) entries.push({ t: f.start, text, source: 'ocr' });
@@ -3716,12 +3843,27 @@ ${lines || '（无台词）'}`;
     const failedShots = [];
     setComposeProgress(2, '开始分镜合成', `共 ${shots.length} 个分镜，先提取台词`, 0);
     try {
-      if (state.rawFrames?.length && !state.pendingSubs.length) {
-        setComposeProgress(3, '提取人物台词', '逐帧识别底部字幕，字幕优先，不让 AI 改写…', 0);
-        await extractDialogueFromFrames(state.rawFrames, (doneFrames, totalFrames, calls) => {
-          setComposeProgress(3 + (doneFrames / totalFrames) * 18, '提取人物台词', `${doneFrames} / ${totalFrames} 帧 · OCR ${calls} 次`, 0);
-        });
-        attachDialogueToShots(p.shots, state.rawFrames);
+      if (!state.pendingSubs.length) {
+        let asrOk = 0;
+        if (state.settings.asr !== false && state.video.file) {
+          setComposeProgress(3, '音频转写台词', '读取视频音轨，按分镜逐段送 DeepSeek ASR…', 0);
+          try {
+            const asr = await transcribeShotsAudio(p.shots, (done, total, ok) => {
+              asrOk = ok;
+              setComposeProgress(3 + (done / total) * 20, '音频转写台词', `${done} / ${total} 音频块 · 识别 ${ok} 条`, 0);
+            });
+            asrOk = asr.ok;
+          } catch (e) {
+            console.warn('ASR unavailable, fallback OCR', e);
+          }
+        }
+        if (!asrOk && state.rawFrames?.length) {
+          setComposeProgress(5, '字幕 OCR 兜底', '音频转写不可用，逐帧识别底部字幕…', 0);
+          await extractDialogueFromFrames(state.rawFrames, (doneFrames, totalFrames, calls) => {
+            setComposeProgress(5 + (doneFrames / totalFrames) * 16, '字幕 OCR 兜底', `${doneFrames} / ${totalFrames} 帧 · OCR ${calls} 次`, 0);
+          });
+          attachDialogueToShots(p.shots, state.rawFrames);
+        }
         p.dialogueAudit = reconcileDialogue(p.shots, state.rawFrames, state.pendingSubs || []);
         renderAll();
       }
@@ -4110,6 +4252,18 @@ ${lines || '（无台词）'}`;
     let base = (state.settings.baseUrl || 'https://api.deepseek.com/v1').trim().replace(/\/+$/, '');
     if (/\/chat\/completions$/i.test(base)) return base;
     return base + '/chat/completions';
+  }
+
+  function asrURL() {
+    let base = (state.settings.baseUrl || 'https://api.deepseek.com/v1').trim().replace(/\/+$/, '');
+    if (/\/chat\/completions$/i.test(base)) base = base.replace(/\/chat\/completions$/i, '');
+    return base + '/tools/asr';
+  }
+
+  function asrHeaders() {
+    const headers = {};
+    if (!state.settings.proxyMode && state.settings.apiKey) headers.Authorization = `Bearer ${state.settings.apiKey.trim()}`;
+    return headers;
   }
 
   function apiHeaders() {
@@ -5046,6 +5200,18 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
       push('');
     }
 
+    push('## 📜 全片台词总表');
+    push('');
+    push('| 时间 | 说话人 | 台词 | 语气 |');
+    push('|---|---|---|---|');
+    if (dialogueRows.length) {
+      for (const r of dialogueRows) push(`| ${fmtTime(r.shot.start)} | ${mdCell(r.speaker || '—')} | ${mdCell(r.text)} | ${mdCell(r.tone || '—')} |`);
+    } else {
+      push('| — | — | 未提取到台词 | — |');
+    }
+    push('');
+    push('---');
+    push('');
     push('## 🎬 表演提示单（按角色）');
     push('');
     if (!profiles.length) {
@@ -5634,6 +5800,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     $('#opt-stream').checked = !!state.settings.stream;
     $('#opt-context').checked = !!state.settings.context;
     $('#opt-reasoning-off').checked = state.settings.reasoningOff !== false;
+    $('#opt-asr').checked = state.settings.asr !== false;
     $('#opt-proxy').checked = !!state.settings.proxyMode;
     $('#test-api-result').textContent = '';
     $('#test-api-result').className = 'help';
@@ -5652,6 +5819,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     state.settings.stream = $('#opt-stream').checked;
     state.settings.context = $('#opt-context').checked;
     state.settings.reasoningOff = $('#opt-reasoning-off').checked;
+    state.settings.asr = $('#opt-asr').checked;
     state.settings.proxyMode = $('#opt-proxy').checked;
     persistSettings();
     renderApiState();
@@ -6283,7 +6451,7 @@ ${shots}`;
     ['#api-base', '#api-vision-model', '#api-text-model', '#api-key'].forEach((sel) => {
       $(sel).addEventListener('input', syncSettingsFromForm);
     });
-    ['#opt-stream', '#opt-context', '#opt-reasoning-off', '#opt-proxy'].forEach((sel) => $(sel).addEventListener('change', syncSettingsFromForm));
+    ['#opt-stream', '#opt-context', '#opt-reasoning-off', '#opt-asr', '#opt-proxy'].forEach((sel) => $(sel).addEventListener('change', syncSettingsFromForm));
     $('#btn-key-eye').addEventListener('click', () => {
       const input = $('#api-key');
       input.type = input.type === 'password' ? 'text' : 'password';
@@ -6390,7 +6558,6 @@ ${shots}`;
 
     // 批量 AI
     $('#btn-batch-ai').addEventListener('click', openBatchAI);
-    $('#btn-side-batch').addEventListener('click', openBatchAI);
     $('#btn-side-ai-settings').addEventListener('click', openSettings);
     $('#btn-compose').addEventListener('click', composeShots);
     $('#btn-compose-stop').addEventListener('click', () => { state.ui.composeStop = true; toast('已请求停止，当前分镜完成后停止。', 'warn'); });
