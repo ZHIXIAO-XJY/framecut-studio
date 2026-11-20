@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "FrameCut 拆镜台",
-  "short_name": "FrameCut",
-  "description": "浏览器内视频抽帧、分镜质检、AI 补全与 Markdown/PDF 交付。",
+  "name": "白夜行 · 拆镜台",
+  "short_name": "白夜行",
+  "description": "视频拆帧、场景段分镜、说话人分离、AI 补全与文档交付。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
