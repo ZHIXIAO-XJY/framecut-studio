@@ -5883,8 +5883,15 @@ ${shot.dialogue || '（无）'}`;
         const [a, b] = lines[arrow].split('-->').map((x) => x.trim().split(/\s+/)[0]);
         const start = parseTimeToken(a);
         const end = parseTimeToken(b);
-        const body = lines.slice(arrow + 1).join(' ').replace(/<[^>]+>/g, '').trim();
-        if (Number.isFinite(start) && body) timed.push({ start, end: Number.isFinite(end) ? end : start + 2, text: body });
+        let body = lines.slice(arrow + 1).join(' ').replace(/<[^>]+>/g, '').trim();
+        let speaker = '';
+        // 带说话人的 SRT：【魏立鹏】台词 / 魏立鹏：台词
+        const sm = body.match(/^(?:【([^】]{1,12})】|\[([^\]]{1,12})\]|([\u4e00-\u9fa5A-Za-z0-9_·]{1,12})\s*[：:])\s*/);
+        if (sm) {
+          speaker = (sm[1] || sm[2] || sm[3] || '').trim();
+          body = body.slice(sm[0].length).trim();
+        }
+        if (Number.isFinite(start) && body) timed.push({ start, end: Number.isFinite(end) ? end : start + 2, text: body, speaker });
       }
     }
 
@@ -5930,6 +5937,11 @@ ${shot.dialogue || '（无）'}`;
         if (line) {
           shot.dialogue = line;
           shot.dialogueSource = 'subtitle';
+          const hit = subs.find((x) => x.start === shot.start || (x.start >= shot.start - .01 && x.start < shot.end));
+          if (hit?.speaker) {
+            shot.speakerHints = shot.speakerHints || {};
+            shot.speakerHints[dialogueKey(line)] = hit.speaker;
+          }
           attached++;
         }
       });
