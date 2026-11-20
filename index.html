@@ -4484,7 +4484,7 @@ ${list}`;
     const lineText = rows.map((r, i) => `${i}. [#${r.shot.index} ${fmtTime(r.shot.start)}] 说话人:${r.speaker || '未知'}｜画面:${(r.shot.description || '').slice(0, 80)}｜台词:${r.text}｜字幕候选:${(r.shot.subtitleCandidates || []).join(' / ') || '—'}`).join('\n');
     const chars = [...new Set(shots.flatMap((s) => (s.characters || []).map((c) => c.name)).filter(Boolean))];
     const prompt = `你是短剧字幕校对。请根据画面上下文、角色关系和前后台词，校对 ASR 台词里的同音错字、漏字、明显错词；只改明显错误，不润色、不改写原意、不增删台词。同音字必须结合语义纠正，例如争执语境里的“你借什么枪”应改为“你接什么腔”；不能保留明显同音错字。
-同时复核说话人：优先使用台词里的称呼、人物关系和上下文。手机/电话/电视/广播里的声音，先判断声源，能对应人物就写“手机（角色名）/电视（角色名）”，不能对应写“手机画外音/电视画外音”；结合后续剧情同一声音出现的人物比对。不能判断才写“画外音”，不要写“未知”。
+同时复核说话人：优先使用台词里的称呼、人物关系和上下文。同一场出现多个角色时，绝不能把所有台词都标成同一个人；台词里称呼了某人，说话人就不能是那个被称呼的人。手机/电话/电视/广播里的声音，先判断声源，能对应人物就写“手机（角色名）/电视（角色名）”，不能对应写“手机画外音/电视画外音”；结合后续剧情同一声音出现的人物比对。不能判断才写“画外音”，不要写“未知”。
 角色名单：${chars.join('、') || '未知'}
 只输出 JSON：{"lines":[{"i":0,"text":"校对后的台词","speaker":"角色名"}]}，i 对应编号，必须覆盖全部编号。
 台词：
@@ -4528,6 +4528,48 @@ ${lineText}`;
       shot.dialogue = lines.map((d) => d.text).join(' / ');
     }
     return byShot.size;
+  }
+
+
+  function validateDialogueSpeakers(shots) {
+    const globalNames = allCastNames(shots);
+    let changed = 0;
+    for (const shot of shots) {
+      const lines = (shot.dialogueLines || []).filter((d) => d && d.text);
+      if (lines.length < 2) continue;
+      const names = [...new Set([...(shot.characters || []).map((c) => c.name), ...globalNames])].filter(Boolean);
+      if (names.length < 2) continue;
+      const unique = new Set(lines.map((d) => d.speaker).filter(Boolean));
+      // 同一场多人，却被模型全部判成同一个人：逐句重判。
+      const allSame = unique.size <= 1;
+      let last = '';
+      lines.forEach((d, idx) => {
+        const text = String(d.text || '');
+        const addressed = names.filter((n) => text.includes(n));
+        let next = d.speaker || '';
+        const genericAddress = /^(大哥|大姐|叔|姨|婶|哥|姐|老板|医生|先生|女士|老婆|老公)[，,]\s*/.test(text);
+        if (addressed.length === 1 && names.length > 1) {
+          // 说话人不能是台词里被称呼的人。
+          const others = names.filter((n) => n !== addressed[0]);
+          if (!next || next === addressed[0] || allSame) next = others.includes(last) ? last : others[0];
+        } else if (genericAddress && names.length > 1) {
+          const others = names.filter((n) => n !== next);
+          next = others.includes(last) ? last : others[0];
+        } else if (allSame) {
+          // 没有任何称呼线索时，按对话轮次交替，至少避免整段同一个人。
+          if (last && names.includes(last)) next = names.find((n) => n !== last) || last;
+          else next = names[idx % names.length];
+        }
+        if (next && next !== d.speaker) {
+          d.speaker = next;
+          shot.speakerHints = shot.speakerHints || {};
+          shot.speakerHints[dialogueKey(d.text)] = next;
+          changed++;
+        }
+        last = d.speaker || last;
+      });
+    }
+    return changed;
   }
 
   async function resolveCastProfiles(shots) {
@@ -4881,6 +4923,7 @@ ${lines || '（无台词）'}`;
       setComposeProgress(95, '台词校对', '纠正同音错字/漏字，并把“未知”说话人落到具体角色…', failed);
       try {
         await resolveDialogueProofread(p.shots);
+        validateDialogueSpeakers(p.shots);
       } catch (e) {
         console.warn('dialogue proofread failed', e);
       }
