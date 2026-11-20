@@ -10,6 +10,8 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#090a0c" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; font-src 'self' data:; connect-src 'self' https: http://127.0.0.1:* http://localhost:*; frame-src 'self' blob:; form-action 'none';" />
+<meta name="referrer" content="no-referrer" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -3994,6 +3996,7 @@ html[data-theme=dark] .modal-layer.drawer-right .modal{box-shadow:-26px 0 80px r
     const key = state.settings.aliKey;
     const fileUrl = state.settings.aliFileUrl;
     if (!key || !fileUrl) throw new Error('未配置阿里云百炼 Key 或 OSS 文件 URL');
+    httpBaseURL(fileUrl, 'OSS 文件 URL');
     const body = JSON.stringify({
       model: 'qwen-audio-3.1-asr-flash-filetrans',
       input: { file_urls: [fileUrl] },
@@ -4977,14 +4980,23 @@ ${lines || '（无台词）'}`;
   }
 
   // ── API 调用 / AI 视觉重解读 ──────────────────────────────
+  function httpBaseURL(raw, label = 'Base URL') {
+    const value = String(raw || '').trim();
+    let u;
+    try { u = new URL(value); } catch (e) { throw new Error(`${label} 必须是完整的 http(s) 地址`); }
+    if (!/^https?:$/.test(u.protocol)) throw new Error(`${label} 只允许 http/https`);
+    if (u.username || u.password) throw new Error(`${label} 不能包含账号密码`);
+    return u;
+  }
+
   function apiURL() {
-    let base = (state.settings.baseUrl || 'https://api.deepseek.com/v1').trim().replace(/\/+$/, '');
+    let base = httpBaseURL(state.settings.baseUrl || 'https://api.deepseek.com/v1').href.replace(/\/+$/, '');
     if (/\/chat\/completions$/i.test(base)) return base;
     return base + '/chat/completions';
   }
 
   function asrURL() {
-    let base = (state.settings.baseUrl || 'https://api.deepseek.com/v1').trim().replace(/\/+$/, '');
+    let base = httpBaseURL(state.settings.baseUrl || 'https://api.deepseek.com/v1').href.replace(/\/+$/, '');
     if (/\/chat\/completions$/i.test(base)) base = base.replace(/\/chat\/completions$/i, '');
     return base + '/tools/asr';
   }
@@ -6817,7 +6829,7 @@ ${p.shots.map((s) => `| #${String(s.index).padStart(3, '0')} | ${statusLabel(s.q
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 18000);
     try {
-      let base = state.settings.baseUrl.replace(/\/+$/, '');
+      let base = httpBaseURL(state.settings.baseUrl).href.replace(/\/+$/, '');
       if (!/\/chat\/completions$/i.test(base)) base += '/chat/completions';
       const res = await fetch(base, {
         method: 'POST',
