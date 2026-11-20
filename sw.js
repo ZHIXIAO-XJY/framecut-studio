@@ -3,16 +3,11 @@
  * - 导航网络优先，断网回退 index.html
  * - 静态资源缓存优先，后台更新
  */
-const VERSION = 'framecut-v1.3.8';
+const VERSION = 'framecut-v1.3.9';
 const BASE = new URL('./', self.location).href;
 const APP_SHELL = [
   BASE,
   BASE + 'index.html',
-  BASE + 'guide.html',
-  BASE + 'guide-main.png',
-  BASE + 'guide-api.png',
-  BASE + 'guide-export.png',
-  BASE + 'guide-review.png',
   BASE + 'favicon.png',
   BASE + 'logo.jpg',
   BASE + 'manifest.webmanifest',
